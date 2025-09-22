@@ -1287,7 +1287,7 @@ networkPolicy:
   enabled: false
 
 # Force namespace of namespaced resources
-forceNamespace: "default"
+forceNamespace: "monitoring"
 
 # Extra manifests to deploy as an array
 extraManifests: []
