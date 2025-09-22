@@ -15,7 +15,7 @@ on:
       namespace:
         description: 'Kubernetes namespace'
         required: true
-        default: 'default'
+        default: 'monitoring'
         type: string
       force_reinstall:
         description: 'Force reinstall (uninstall first)'
