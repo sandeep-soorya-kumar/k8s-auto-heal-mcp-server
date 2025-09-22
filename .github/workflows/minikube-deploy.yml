@@ -1,16 +1,17 @@
-name: 🚀 Deploy to Minikube
+name: 🧪 Test Deploy to Minikube (CI/CD Testing)
 
 on:
-  push:
-    branches: [ main ]
-    paths:
-      - 'helm/prometheus/**'
-      - '.github/workflows/minikube-deploy.yml'
-  pull_request:
-    branches: [ main ]
-    paths:
-      - 'helm/prometheus/**'
-      - '.github/workflows/minikube-deploy.yml'
+  # Disabled automatic triggers - using ArgoCD for GitOps instead
+  # push:
+  #   branches: [ main ]
+  #   paths:
+  #     - 'helm/prometheus/**'
+  #     - '.github/workflows/minikube-deploy.yml'
+  # pull_request:
+  #   branches: [ main ]
+  #   paths:
+  #     - 'helm/prometheus/**'
+  #     - '.github/workflows/minikube-deploy.yml'
   workflow_dispatch:
     inputs:
       force_deploy:
@@ -58,9 +59,9 @@ jobs:
           name: helm-manifests
           path: ./generated-manifests/
 
-  # Job 2: Deploy to Minikube
+  # Job 2: Deploy to Minikube (TEST ENVIRONMENT ONLY)
   deploy:
-    name: 🚀 Deploy to Minikube
+    name: 🧪 Deploy to Test Minikube
     runs-on: ubuntu-latest
     needs: validate
     if: github.event_name == 'push' || github.event.inputs.force_deploy == 'true'
