@@ -101,10 +101,20 @@ jobs:
         run: |
           echo "📁 Creating namespace if it doesn't exist..."
           minikube kubectl -- create namespace ${{ env.NAMESPACE }} --dry-run=client -o yaml | minikube kubectl -- apply -f -
+          echo "✅ Namespace ${{ env.NAMESPACE }} created/verified"
+          minikube kubectl -- get namespaces
 
       - name: Deploy Prometheus
         run: |
           echo "🚀 Deploying Prometheus Helm chart..."
+          echo "📋 Namespace: ${{ env.NAMESPACE }}"
+          echo "📋 Release: ${{ env.RELEASE_NAME }}"
+          echo "📋 Chart: ${{ env.HELM_CHART_PATH }}"
+          
+          # Ensure namespace exists
+          minikube kubectl -- create namespace ${{ env.NAMESPACE }} --dry-run=client -o yaml | minikube kubectl -- apply -f -
+          
+          # Deploy with explicit namespace creation
           helm upgrade --install ${{ env.RELEASE_NAME }} ${{ env.HELM_CHART_PATH }} \
             --namespace ${{ env.NAMESPACE }} \
             --create-namespace \

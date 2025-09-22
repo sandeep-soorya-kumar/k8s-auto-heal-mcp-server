@@ -70,6 +70,14 @@ jobs:
       - name: Deploy Prometheus
         run: |
           echo "🚀 Deploying Prometheus to ${{ github.event.inputs.environment }} environment..."
+          echo "📋 Namespace: ${{ github.event.inputs.namespace }}"
+          echo "📋 Release: ${{ env.RELEASE_NAME }}"
+          echo "📋 Chart: ${{ env.HELM_CHART_PATH }}"
+          
+          # Ensure namespace exists
+          minikube kubectl -- create namespace ${{ github.event.inputs.namespace }} --dry-run=client -o yaml | minikube kubectl -- apply -f -
+          
+          # Deploy with explicit namespace creation
           helm upgrade --install ${{ env.RELEASE_NAME }} ${{ env.HELM_CHART_PATH }} \
             --namespace ${{ github.event.inputs.namespace }} \
             --create-namespace \
