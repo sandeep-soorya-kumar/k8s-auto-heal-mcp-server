@@ -1,0 +1,185 @@
+name: 🚀 Deploy to Minikube
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'helm/prometheus/**'
+      - '.github/workflows/minikube-deploy.yml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'helm/prometheus/**'
+      - '.github/workflows/minikube-deploy.yml'
+  workflow_dispatch:
+    inputs:
+      force_deploy:
+        description: 'Force deployment even if no changes detected'
+        required: false
+        default: 'false'
+        type: boolean
+
+env:
+  HELM_CHART_PATH: './helm/prometheus'
+  NAMESPACE: 'default'
+  RELEASE_NAME: 'prometheus'
+
+jobs:
+  # Job 1: Validate Helm Chart
+  validate:
+    name: 🔍 Validate Helm Chart
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Helm
+        uses: azure/setup-helm@v3
+        with:
+          version: '3.12.0'
+
+      - name: Lint Helm Chart
+        run: |
+          echo "🔍 Linting Helm chart..."
+          helm lint ${{ env.HELM_CHART_PATH }}
+          echo "✅ Helm chart validation passed!"
+
+      - name: Template Helm Chart
+        run: |
+          echo "📋 Generating Kubernetes manifests..."
+          helm template ${{ env.RELEASE_NAME }} ${{ env.HELM_CHART_PATH }} \
+            --namespace ${{ env.NAMESPACE }} \
+            --output-dir ./generated-manifests
+          echo "✅ Helm template generation successful!"
+
+      - name: Upload generated manifests
+        uses: actions/upload-artifact@v3
+        with:
+          name: helm-manifests
+          path: ./generated-manifests/
+
+  # Job 2: Deploy to Minikube
+  deploy:
+    name: 🚀 Deploy to Minikube
+    runs-on: ubuntu-latest
+    needs: validate
+    if: github.event_name == 'push' || github.event.inputs.force_deploy == 'true'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Helm
+        uses: azure/setup-helm@v3
+        with:
+          version: '3.12.0'
+
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: 'v1.28.0'
+
+      - name: Setup minikube
+        run: |
+          echo "📦 Installing minikube..."
+          curl -LO https://storage.googleapis.com/minikube/releases/latest/minikube-linux-amd64
+          sudo install minikube-linux-amd64 /usr/local/bin/minikube
+          minikube version
+
+      - name: Start minikube
+        run: |
+          echo "🚀 Starting minikube cluster..."
+          minikube start --driver=docker --memory=4096 --cpus=2
+          minikube status
+
+      - name: Configure kubectl
+        run: |
+          echo "⚙️ Configuring kubectl..."
+          minikube kubectl -- get nodes
+          minikube kubectl -- get namespaces
+
+      - name: Create namespace
+        run: |
+          echo "📁 Creating namespace if it doesn't exist..."
+          minikube kubectl -- create namespace ${{ env.NAMESPACE }} --dry-run=client -o yaml | minikube kubectl -- apply -f -
+
+      - name: Deploy Prometheus
+        run: |
+          echo "🚀 Deploying Prometheus Helm chart..."
+          helm upgrade --install ${{ env.RELEASE_NAME }} ${{ env.HELM_CHART_PATH }} \
+            --namespace ${{ env.NAMESPACE }} \
+            --create-namespace \
+            --wait \
+            --timeout=10m \
+            --atomic
+          echo "✅ Prometheus deployment completed!"
+
+      - name: Verify deployment
+        run: |
+          echo "🔍 Verifying deployment..."
+          minikube kubectl -- get pods -n ${{ env.NAMESPACE }}
+          minikube kubectl -- get services -n ${{ env.NAMESPACE }}
+          minikube kubectl -- get deployments -n ${{ env.NAMESPACE }}
+          
+          echo "📊 Checking pod status..."
+          minikube kubectl -- wait --for=condition=ready pod -l app.kubernetes.io/name=prometheus -n ${{ env.NAMESPACE }} --timeout=300s
+          echo "✅ All pods are ready!"
+
+      - name: Get service URLs
+        run: |
+          echo "🌐 Service information:"
+          minikube kubectl -- get services -n ${{ env.NAMESPACE }}
+          echo ""
+          echo "🔗 To access Prometheus locally, run:"
+          echo "minikube service prometheus-server -n ${{ env.NAMESPACE }}"
+          echo ""
+          echo "🔗 To access Grafana locally, run:"
+          echo "minikube service prometheus-grafana -n ${{ env.NAMESPACE }}"
+
+      - name: Run health checks
+        run: |
+          echo "🏥 Running health checks..."
+          # Check if Prometheus is responding
+          POD_NAME=$(minikube kubectl -- get pods -n ${{ env.NAMESPACE }} -l app.kubernetes.io/name=prometheus -o jsonpath='{.items[0].metadata.name}')
+          if [ -n "$POD_NAME" ]; then
+            echo "✅ Prometheus pod found: $POD_NAME"
+            minikube kubectl -- exec -n ${{ env.NAMESPACE }} $POD_NAME -- wget -qO- http://localhost:9090/-/healthy
+            echo "✅ Prometheus health check passed!"
+          else
+            echo "❌ Prometheus pod not found!"
+            exit 1
+          fi
+
+  # Job 3: Cleanup (runs on failure)
+  cleanup:
+    name: 🧹 Cleanup
+    runs-on: ubuntu-latest
+    needs: [validate, deploy]
+    if: always() && (needs.validate.result == 'failure' || needs.deploy.result == 'failure')
+    steps:
+      - name: Cleanup minikube
+        run: |
+          echo "🧹 Cleaning up minikube..."
+          minikube delete || true
+          echo "✅ Cleanup completed!"
+
+  # Job 4: Notification
+  notify:
+    name: 📢 Notify
+    runs-on: ubuntu-latest
+    needs: [validate, deploy]
+    if: always()
+    steps:
+      - name: Deployment Status
+        run: |
+          if [ "${{ needs.deploy.result }}" == "success" ]; then
+            echo "🎉 Deployment successful!"
+            echo "✅ Prometheus is now running in the default namespace"
+            echo "🔗 Access Prometheus: minikube service prometheus-server -n default"
+            echo "🔗 Access Grafana: minikube service prometheus-grafana -n default"
+          elif [ "${{ needs.validate.result }}" == "failure" ]; then
+            echo "❌ Validation failed!"
+            echo "🔍 Check the validate job logs for details"
+          else
+            echo "❌ Deployment failed!"
+            echo "🔍 Check the deploy job logs for details"
+          fi

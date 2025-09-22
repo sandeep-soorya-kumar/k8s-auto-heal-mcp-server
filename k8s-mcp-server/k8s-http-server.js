@@ -258,6 +258,181 @@ app.get('/api/oom-events', async (req, res) => {
   }
 });
 
+// 📦 Helm endpoints
+app.post('/api/helm/install', async (req, res) => {
+  try {
+    const { releaseName, chart, namespace = 'default', values, valuesFile, createNamespace = false, wait = true, timeout = '10m' } = req.body;
+    
+    if (!releaseName || !chart) {
+      return res.status(400).json({ error: 'releaseName and chart are required' });
+    }
+    
+    let command = `helm install ${releaseName} ${chart} --namespace ${namespace}`;
+    
+    if (createNamespace) {
+      command += ' --create-namespace';
+    }
+    
+    if (wait) {
+      command += ' --wait';
+    }
+    
+    if (timeout) {
+      command += ` --timeout ${timeout}`;
+    }
+    
+    if (valuesFile) {
+      command += ` --values ${valuesFile}`;
+    }
+    
+    if (values) {
+      const setParams = Object.entries(values)
+        .map(([key, value]) => `--set ${key}=${value}`)
+        .join(' ');
+      command += ` ${setParams}`;
+    }
+    
+    const result = execSync(command, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
+    
+    res.json({
+      success: true,
+      releaseName,
+      chart,
+      namespace,
+      output: result
+    });
+  } catch (error) {
+    res.status(500).json({ error: `Helm install failed: ${error.message}` });
+  }
+});
+
+app.post('/api/helm/upgrade', async (req, res) => {
+  try {
+    const { releaseName, chart, namespace = 'default', values, valuesFile, wait = true, timeout = '10m' } = req.body;
+    
+    if (!releaseName || !chart) {
+      return res.status(400).json({ error: 'releaseName and chart are required' });
+    }
+    
+    let command = `helm upgrade ${releaseName} ${chart} --namespace ${namespace}`;
+    
+    if (wait) {
+      command += ' --wait';
+    }
+    
+    if (timeout) {
+      command += ` --timeout ${timeout}`;
+    }
+    
+    if (valuesFile) {
+      command += ` --values ${valuesFile}`;
+    }
+    
+    if (values) {
+      const setParams = Object.entries(values)
+        .map(([key, value]) => `--set ${key}=${value}`)
+        .join(' ');
+      command += ` ${setParams}`;
+    }
+    
+    const result = execSync(command, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
+    
+    res.json({
+      success: true,
+      releaseName,
+      chart,
+      namespace,
+      output: result
+    });
+  } catch (error) {
+    res.status(500).json({ error: `Helm upgrade failed: ${error.message}` });
+  }
+});
+
+app.delete('/api/helm/uninstall/:releaseName', async (req, res) => {
+  try {
+    const { releaseName } = req.params;
+    const { namespace = 'default', wait = true } = req.body;
+    
+    let command = `helm uninstall ${releaseName} --namespace ${namespace}`;
+    
+    if (wait) {
+      command += ' --wait';
+    }
+    
+    const result = execSync(command, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
+    
+    res.json({
+      success: true,
+      releaseName,
+      namespace,
+      output: result
+    });
+  } catch (error) {
+    res.status(500).json({ error: `Helm uninstall failed: ${error.message}` });
+  }
+});
+
+app.get('/api/helm/list', async (req, res) => {
+  try {
+    const { namespace, allNamespaces = false } = req.query;
+    
+    let command = 'helm list';
+    
+    if (allNamespaces === 'true') {
+      command += ' --all-namespaces';
+    } else if (namespace) {
+      command += ` --namespace ${namespace}`;
+    }
+    
+    const result = execSync(command, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
+    
+    res.json({
+      success: true,
+      scope: allNamespaces === 'true' ? 'All namespaces' : namespace || 'default',
+      output: result
+    });
+  } catch (error) {
+    res.status(500).json({ error: `Helm list failed: ${error.message}` });
+  }
+});
+
+app.post('/api/helm/repo/add', async (req, res) => {
+  try {
+    const { name, url } = req.body;
+    
+    if (!name || !url) {
+      return res.status(400).json({ error: 'name and url are required' });
+    }
+    
+    const command = `helm repo add ${name} ${url}`;
+    const result = execSync(command, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
+    
+    res.json({
+      success: true,
+      name,
+      url,
+      output: result
+    });
+  } catch (error) {
+    res.status(500).json({ error: `Helm repo add failed: ${error.message}` });
+  }
+});
+
+app.post('/api/helm/repo/update', async (req, res) => {
+  try {
+    const command = 'helm repo update';
+    const result = execSync(command, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
+    
+    res.json({
+      success: true,
+      output: result
+    });
+  } catch (error) {
+    res.status(500).json({ error: `Helm repo update failed: ${error.message}` });
+  }
+});
+
 // 🎯 Webhook endpoint for Prometheus alerts
 app.post('/webhook/alerts', (req, res) => {
   console.log('🚨 Received Prometheus alert:', JSON.stringify(req.body, null, 2));

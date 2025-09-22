@@ -1,0 +1,32 @@
+name: prometheus-deploy
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+jobs:
+  deploy-prometheus:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Setup Helm
+        uses: azure/setup-helm@v3
+        with:
+          version: "3.12.0"
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: "v1.28.0"
+      - name: Setup minikube
+        run: curl -LO https://storage.googleapis.com/minikube/releases/latest/minikube-linux-amd64
+sudo install minikube-linux-amd64 /usr/local/bin/minikube
+      - name: Start minikube
+        run: minikube start --driver=docker
+      - name: Configure kubectl
+        run: minikube kubectl -- get pods
+      - name: Deploy Prometheus
+        run: helm upgrade --install prometheus ./helm/prometheus --namespace default --create-namespace --wait
+      - name: Verify deployment
+        run: kubectl get pods -n default | grep prometheus

@@ -1,0 +1,105 @@
+name: 🏠 Local Development Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Deployment environment'
+        required: true
+        default: 'development'
+        type: choice
+        options:
+          - development
+          - staging
+          - production
+      namespace:
+        description: 'Kubernetes namespace'
+        required: true
+        default: 'default'
+        type: string
+      force_reinstall:
+        description: 'Force reinstall (uninstall first)'
+        required: false
+        default: false
+        type: boolean
+
+env:
+  HELM_CHART_PATH: './helm/prometheus'
+  RELEASE_NAME: 'prometheus'
+
+jobs:
+  deploy:
+    name: 🚀 Deploy Prometheus
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Helm
+        uses: azure/setup-helm@v3
+        with:
+          version: '3.12.0'
+
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: 'v1.28.0'
+
+      - name: Setup minikube
+        run: |
+          echo "📦 Installing minikube..."
+          curl -LO https://storage.googleapis.com/minikube/releases/latest/minikube-linux-amd64
+          sudo install minikube-linux-amd64 /usr/local/bin/minikube
+
+      - name: Start minikube
+        run: |
+          echo "🚀 Starting minikube cluster..."
+          minikube start --driver=docker --memory=4096 --cpus=2
+
+      - name: Configure kubectl
+        run: |
+          echo "⚙️ Configuring kubectl..."
+          minikube kubectl -- get nodes
+
+      - name: Uninstall existing release (if force_reinstall)
+        if: ${{ github.event.inputs.force_reinstall == 'true' }}
+        run: |
+          echo "🗑️ Uninstalling existing release..."
+          helm uninstall ${{ env.RELEASE_NAME }} --namespace ${{ github.event.inputs.namespace }} || true
+
+      - name: Deploy Prometheus
+        run: |
+          echo "🚀 Deploying Prometheus to ${{ github.event.inputs.environment }} environment..."
+          helm upgrade --install ${{ env.RELEASE_NAME }} ${{ env.HELM_CHART_PATH }} \
+            --namespace ${{ github.event.inputs.namespace }} \
+            --create-namespace \
+            --wait \
+            --timeout=10m \
+            --set global.environment=${{ github.event.inputs.environment }} \
+            --atomic
+          echo "✅ Deployment completed!"
+
+      - name: Verify deployment
+        run: |
+          echo "🔍 Verifying deployment..."
+          minikube kubectl -- get pods -n ${{ github.event.inputs.namespace }}
+          minikube kubectl -- get services -n ${{ github.event.inputs.namespace }}
+          
+          echo "📊 Waiting for pods to be ready..."
+          minikube kubectl -- wait --for=condition=ready pod -l app.kubernetes.io/name=prometheus -n ${{ github.event.inputs.namespace }} --timeout=300s
+
+      - name: Show access information
+        run: |
+          echo "🎉 Deployment successful!"
+          echo ""
+          echo "📋 Deployment Details:"
+          echo "  Environment: ${{ github.event.inputs.environment }}"
+          echo "  Namespace: ${{ github.event.inputs.namespace }}"
+          echo "  Release: ${{ env.RELEASE_NAME }}"
+          echo ""
+          echo "🔗 Access URLs:"
+          echo "  Prometheus: minikube service prometheus-server -n ${{ github.event.inputs.namespace }}"
+          echo "  Grafana: minikube service prometheus-grafana -n ${{ github.event.inputs.namespace }}"
+          echo ""
+          echo "📊 Pod Status:"
+          minikube kubectl -- get pods -n ${{ github.event.inputs.namespace }} -o wide

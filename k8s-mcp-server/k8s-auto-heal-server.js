@@ -46,16 +46,27 @@ const CONFIG = {
 
 // 🎯 Kubernetes Client Setup
 const kc = new k8s.KubeConfig();
+let k8sApi, k8sAppsApi;
+
 try {
   kc.loadFromDefault();
+  k8sApi = kc.makeApiClient(k8s.CoreV1Api);
+  k8sAppsApi = kc.makeApiClient(k8s.AppsV1Api);
+  console.log('✅ Kubernetes client initialized successfully');
 } catch (error) {
   console.error('❌ Failed to load Kubernetes config:', error.message);
-  process.exit(1);
+  console.error('⚠️  Some Kubernetes features may not work properly');
 }
 
-const k8sApi = kc.makeApiClient(k8s.CoreV1Api);
-const k8sAppsApi = kc.makeApiClient(k8s.AppsV1Api);
-const k8sMetricsApi = kc.makeApiClient(k8s.Metrics);
+// Initialize metrics API client separately with error handling
+let k8sMetricsApi;
+try {
+  if (k8sApi) {
+    k8sMetricsApi = kc.makeApiClient(k8s.Metrics);
+  }
+} catch (error) {
+  console.error('⚠️  Metrics API not available:', error.message);
+}
 
 // 🐙 GitHub API Client
 const octokit = CONFIG.GITHUB_TOKEN ? new Octokit({
@@ -241,6 +252,276 @@ class KubernetesAutoHealServer {
               }
             }
           }
+        },
+        {
+          name: "helm-install",
+          description: "📦 Install a Helm chart",
+          inputSchema: {
+            type: "object",
+            properties: {
+              releaseName: { type: "string", description: "Name for the Helm release" },
+              chart: { type: "string", description: "Chart name (repo/chart or local path)" },
+              namespace: { type: "string", description: "Kubernetes namespace", default: "default" },
+              values: { type: "object", description: "Helm values to override" },
+              valuesFile: { type: "string", description: "Path to values file" },
+              createNamespace: { type: "boolean", description: "Create namespace if it doesn't exist", default: false },
+              wait: { type: "boolean", description: "Wait for deployment to complete", default: true },
+              timeout: { type: "string", description: "Timeout for deployment", default: "10m" }
+            },
+            required: ["releaseName", "chart"]
+          }
+        },
+        {
+          name: "helm-upgrade",
+          description: "🔄 Upgrade a Helm release",
+          inputSchema: {
+            type: "object",
+            properties: {
+              releaseName: { type: "string", description: "Name of the Helm release" },
+              chart: { type: "string", description: "Chart name (repo/chart or local path)" },
+              namespace: { type: "string", description: "Kubernetes namespace", default: "default" },
+              values: { type: "object", description: "Helm values to override" },
+              valuesFile: { type: "string", description: "Path to values file" },
+              wait: { type: "boolean", description: "Wait for upgrade to complete", default: true },
+              timeout: { type: "string", description: "Timeout for upgrade", default: "10m" }
+            },
+            required: ["releaseName", "chart"]
+          }
+        },
+        {
+          name: "helm-uninstall",
+          description: "🗑️ Uninstall a Helm release",
+          inputSchema: {
+            type: "object",
+            properties: {
+              releaseName: { type: "string", description: "Name of the Helm release" },
+              namespace: { type: "string", description: "Kubernetes namespace", default: "default" },
+              wait: { type: "boolean", description: "Wait for uninstall to complete", default: true }
+            },
+            required: ["releaseName"]
+          }
+        },
+        {
+          name: "helm-list",
+          description: "📋 List Helm releases",
+          inputSchema: {
+            type: "object",
+            properties: {
+              namespace: { type: "string", description: "Kubernetes namespace (all namespaces if not specified)" },
+              allNamespaces: { type: "boolean", description: "List releases across all namespaces", default: false }
+            }
+          }
+        },
+        {
+          name: "helm-repo-add",
+          description: "📚 Add a Helm repository",
+          inputSchema: {
+            type: "object",
+            properties: {
+              name: { type: "string", description: "Repository name" },
+              url: { type: "string", description: "Repository URL" }
+            },
+            required: ["name", "url"]
+          }
+        },
+        {
+          name: "helm-repo-update",
+          description: "🔄 Update Helm repositories",
+          inputSchema: {
+            type: "object",
+            properties: {}
+          }
+        },
+        // 🎯 kubectl Commands
+        {
+          name: "kubectl-get",
+          description: "📋 Get Kubernetes resources",
+          inputSchema: {
+            type: "object",
+            properties: {
+              resource: { type: "string", description: "Resource type (pods, services, deployments, etc.)" },
+              namespace: { type: "string", description: "Kubernetes namespace" },
+              name: { type: "string", description: "Specific resource name" },
+              allNamespaces: { type: "boolean", description: "Get resources from all namespaces", default: false },
+              selector: { type: "string", description: "Label selector" },
+              output: { type: "string", description: "Output format", enum: ["yaml", "json", "wide", "name"], default: "wide" }
+            },
+            required: ["resource"]
+          }
+        },
+        {
+          name: "kubectl-describe",
+          description: "📖 Describe Kubernetes resources",
+          inputSchema: {
+            type: "object",
+            properties: {
+              resource: { type: "string", description: "Resource type" },
+              name: { type: "string", description: "Resource name" },
+              namespace: { type: "string", description: "Kubernetes namespace" }
+            },
+            required: ["resource", "name"]
+          }
+        },
+        {
+          name: "kubectl-logs",
+          description: "📜 Get pod logs",
+          inputSchema: {
+            type: "object",
+            properties: {
+              podName: { type: "string", description: "Pod name" },
+              namespace: { type: "string", description: "Kubernetes namespace" },
+              container: { type: "string", description: "Container name" },
+              follow: { type: "boolean", description: "Follow logs", default: false },
+              previous: { type: "boolean", description: "Get previous container logs", default: false },
+              tail: { type: "number", description: "Number of lines to show from the end" },
+              since: { type: "string", description: "Show logs since time/duration (e.g., '1h', '30m')" }
+            },
+            required: ["podName"]
+          }
+        },
+        {
+          name: "kubectl-exec",
+          description: "🔧 Execute command in pod",
+          inputSchema: {
+            type: "object",
+            properties: {
+              podName: { type: "string", description: "Pod name" },
+              namespace: { type: "string", description: "Kubernetes namespace" },
+              container: { type: "string", description: "Container name" },
+              command: { type: "array", items: { type: "string" }, description: "Command to execute" },
+              interactive: { type: "boolean", description: "Interactive mode", default: false }
+            },
+            required: ["podName", "command"]
+          }
+        },
+        {
+          name: "kubectl-apply",
+          description: "⚡ Apply Kubernetes manifest",
+          inputSchema: {
+            type: "object",
+            properties: {
+              filename: { type: "string", description: "YAML/JSON manifest file path" },
+              namespace: { type: "string", description: "Kubernetes namespace" },
+              recursive: { type: "boolean", description: "Apply recursively", default: false },
+              dryRun: { type: "boolean", description: "Dry run mode", default: false }
+            },
+            required: ["filename"]
+          }
+        },
+        {
+          name: "kubectl-delete",
+          description: "🗑️ Delete Kubernetes resources",
+          inputSchema: {
+            type: "object",
+            properties: {
+              resource: { type: "string", description: "Resource type" },
+              name: { type: "string", description: "Resource name" },
+              namespace: { type: "string", description: "Kubernetes namespace" },
+              filename: { type: "string", description: "YAML/JSON manifest file path" },
+              force: { type: "boolean", description: "Force delete", default: false },
+              gracePeriod: { type: "number", description: "Grace period in seconds" }
+            }
+          }
+        },
+        {
+          name: "kubectl-scale",
+          description: "📏 Scale Kubernetes resources",
+          inputSchema: {
+            type: "object",
+            properties: {
+              resource: { type: "string", description: "Resource type (deployment, replicaset, etc.)" },
+              name: { type: "string", description: "Resource name" },
+              namespace: { type: "string", description: "Kubernetes namespace" },
+              replicas: { type: "number", description: "Number of replicas" }
+            },
+            required: ["resource", "name", "replicas"]
+          }
+        },
+        {
+          name: "kubectl-rollout",
+          description: "🔄 Manage rollouts",
+          inputSchema: {
+            type: "object",
+            properties: {
+              action: { type: "string", description: "Rollout action", enum: ["status", "history", "restart", "undo"] },
+              resource: { type: "string", description: "Resource type (deployment, daemonset, etc.)" },
+              name: { type: "string", description: "Resource name" },
+              namespace: { type: "string", description: "Kubernetes namespace" },
+              revision: { type: "number", description: "Revision number for undo" }
+            },
+            required: ["action", "resource", "name"]
+          }
+        },
+        {
+          name: "kubectl-port-forward",
+          description: "🌐 Port forward to pod/service",
+          inputSchema: {
+            type: "object",
+            properties: {
+              resource: { type: "string", description: "Resource (pod/service name)" },
+              namespace: { type: "string", description: "Kubernetes namespace" },
+              ports: { type: "string", description: "Port mapping (local:remote)" },
+              background: { type: "boolean", description: "Run in background", default: false }
+            },
+            required: ["resource", "ports"]
+          }
+        },
+        {
+          name: "kubectl-top",
+          description: "📊 Show resource usage",
+          inputSchema: {
+            type: "object",
+            properties: {
+              resource: { type: "string", description: "Resource type", enum: ["nodes", "pods"] },
+              namespace: { type: "string", description: "Kubernetes namespace" },
+              allNamespaces: { type: "boolean", description: "All namespaces", default: false },
+              selector: { type: "string", description: "Label selector" }
+            },
+            required: ["resource"]
+          }
+        },
+        {
+          name: "kubectl-patch",
+          description: "🔧 Patch Kubernetes resource",
+          inputSchema: {
+            type: "object",
+            properties: {
+              resource: { type: "string", description: "Resource type" },
+              name: { type: "string", description: "Resource name" },
+              namespace: { type: "string", description: "Kubernetes namespace" },
+              patch: { type: "string", description: "JSON/YAML patch" },
+              type: { type: "string", description: "Patch type", enum: ["strategic", "merge", "json"], default: "strategic" }
+            },
+            required: ["resource", "name", "patch"]
+          }
+        },
+        {
+          name: "kubectl-create",
+          description: "➕ Create Kubernetes resources",
+          inputSchema: {
+            type: "object",
+            properties: {
+              resource: { type: "string", description: "Resource type (namespace, secret, configmap, etc.)" },
+              name: { type: "string", description: "Resource name" },
+              namespace: { type: "string", description: "Kubernetes namespace" },
+              filename: { type: "string", description: "YAML/JSON manifest file path" },
+              options: { type: "object", description: "Additional options" }
+            }
+          }
+        },
+        {
+          name: "kubectl-config",
+          description: "⚙️ Manage kubectl configuration",
+          inputSchema: {
+            type: "object",
+            properties: {
+              action: { type: "string", description: "Config action", enum: ["current-context", "get-contexts", "use-context", "set-context", "view"] },
+              context: { type: "string", description: "Context name" },
+              cluster: { type: "string", description: "Cluster name" },
+              user: { type: "string", description: "User name" }
+            },
+            required: ["action"]
+          }
         }
       ]
     }));
@@ -269,6 +550,45 @@ class KubernetesAutoHealServer {
             return await this.getHealingHistory(args);
           case "get-cluster-recommendations":
             return await this.getClusterRecommendations(args);
+          case "helm-install":
+            return await this.helmInstall(args);
+          case "helm-upgrade":
+            return await this.helmUpgrade(args);
+          case "helm-uninstall":
+            return await this.helmUninstall(args);
+          case "helm-list":
+            return await this.helmList(args);
+          case "helm-repo-add":
+            return await this.helmRepoAdd(args);
+          case "helm-repo-update":
+            return await this.helmRepoUpdate();
+          // kubectl commands
+          case "kubectl-get":
+            return await this.kubectlGet(args);
+          case "kubectl-describe":
+            return await this.kubectlDescribe(args);
+          case "kubectl-logs":
+            return await this.kubectlLogs(args);
+          case "kubectl-exec":
+            return await this.kubectlExec(args);
+          case "kubectl-apply":
+            return await this.kubectlApply(args);
+          case "kubectl-delete":
+            return await this.kubectlDelete(args);
+          case "kubectl-scale":
+            return await this.kubectlScale(args);
+          case "kubectl-rollout":
+            return await this.kubectlRollout(args);
+          case "kubectl-port-forward":
+            return await this.kubectlPortForward(args);
+          case "kubectl-top":
+            return await this.kubectlTop(args);
+          case "kubectl-patch":
+            return await this.kubectlPatch(args);
+          case "kubectl-create":
+            return await this.kubectlCreate(args);
+          case "kubectl-config":
+            return await this.kubectlConfig(args);
           default:
             throw new Error(`Unknown tool: ${name}`);
         }
@@ -1150,6 +1470,654 @@ class KubernetesAutoHealServer {
            `Merging this PR will trigger the deployment pipeline to apply these fixes.\n\n` +
            `---\n` +
            `*This PR was automatically created by the K8s Auto-Heal system at ${new Date().toISOString()}*`;
+  }
+
+  // 📦 Helm Methods
+  async helmInstall(args) {
+    const { releaseName, chart, namespace = 'default', values, valuesFile, createNamespace = false, wait = true, timeout = '10m' } = args;
+    
+    try {
+      let command = `helm install ${releaseName} ${chart} --namespace ${namespace}`;
+      
+      if (createNamespace) {
+        command += ' --create-namespace';
+      }
+      
+      if (wait) {
+        command += ' --wait';
+      }
+      
+      if (timeout) {
+        command += ` --timeout ${timeout}`;
+      }
+      
+      if (valuesFile) {
+        command += ` --values ${valuesFile}`;
+      }
+      
+      if (values) {
+        // Convert values object to --set parameters
+        const setParams = Object.entries(values)
+          .map(([key, value]) => `--set ${key}=${value}`)
+          .join(' ');
+        command += ` ${setParams}`;
+      }
+      
+      const result = execSync(command, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
+      
+      return {
+        content: [{
+          type: "text",
+          text: `📦 **Helm Install Successful**\n\n` +
+                `**Release**: ${releaseName}\n` +
+                `**Chart**: ${chart}\n` +
+                `**Namespace**: ${namespace}\n\n` +
+                `**Output**:\n\`\`\`\n${result}\n\`\`\``
+        }]
+      };
+    } catch (error) {
+      throw new Error(`Helm install failed: ${error.message}`);
+    }
+  }
+
+  async helmUpgrade(args) {
+    const { releaseName, chart, namespace = 'default', values, valuesFile, wait = true, timeout = '10m' } = args;
+    
+    try {
+      let command = `helm upgrade ${releaseName} ${chart} --namespace ${namespace}`;
+      
+      if (wait) {
+        command += ' --wait';
+      }
+      
+      if (timeout) {
+        command += ` --timeout ${timeout}`;
+      }
+      
+      if (valuesFile) {
+        command += ` --values ${valuesFile}`;
+      }
+      
+      if (values) {
+        const setParams = Object.entries(values)
+          .map(([key, value]) => `--set ${key}=${value}`)
+          .join(' ');
+        command += ` ${setParams}`;
+      }
+      
+      const result = execSync(command, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
+      
+      return {
+        content: [{
+          type: "text",
+          text: `🔄 **Helm Upgrade Successful**\n\n` +
+                `**Release**: ${releaseName}\n` +
+                `**Chart**: ${chart}\n` +
+                `**Namespace**: ${namespace}\n\n` +
+                `**Output**:\n\`\`\`\n${result}\n\`\`\``
+        }]
+      };
+    } catch (error) {
+      throw new Error(`Helm upgrade failed: ${error.message}`);
+    }
+  }
+
+  async helmUninstall(args) {
+    const { releaseName, namespace = 'default', wait = true } = args;
+    
+    try {
+      let command = `helm uninstall ${releaseName} --namespace ${namespace}`;
+      
+      if (wait) {
+        command += ' --wait';
+      }
+      
+      const result = execSync(command, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
+      
+      return {
+        content: [{
+          type: "text",
+          text: `🗑️ **Helm Uninstall Successful**\n\n` +
+                `**Release**: ${releaseName}\n` +
+                `**Namespace**: ${namespace}\n\n` +
+                `**Output**:\n\`\`\`\n${result}\n\`\`\``
+        }]
+      };
+    } catch (error) {
+      throw new Error(`Helm uninstall failed: ${error.message}`);
+    }
+  }
+
+  async helmList(args = {}) {
+    const { namespace, allNamespaces = false } = args;
+    
+    try {
+      let command = 'helm list';
+      
+      if (allNamespaces) {
+        command += ' --all-namespaces';
+      } else if (namespace) {
+        command += ` --namespace ${namespace}`;
+      }
+      
+      const result = execSync(command, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
+      
+      return {
+        content: [{
+          type: "text",
+          text: `📋 **Helm Releases**\n\n` +
+                `**Scope**: ${allNamespaces ? 'All namespaces' : namespace || 'default'}\n\n` +
+                `**Output**:\n\`\`\`\n${result}\n\`\`\``
+        }]
+      };
+    } catch (error) {
+      throw new Error(`Helm list failed: ${error.message}`);
+    }
+  }
+
+  async helmRepoAdd(args) {
+    const { name, url } = args;
+    
+    try {
+      const command = `helm repo add ${name} ${url}`;
+      const result = execSync(command, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
+      
+      return {
+        content: [{
+          type: "text",
+          text: `📚 **Helm Repository Added**\n\n` +
+                `**Name**: ${name}\n` +
+                `**URL**: ${url}\n\n` +
+                `**Output**:\n\`\`\`\n${result}\n\`\`\``
+        }]
+      };
+    } catch (error) {
+      throw new Error(`Helm repo add failed: ${error.message}`);
+    }
+  }
+
+  async helmRepoUpdate() {
+    try {
+      const command = 'helm repo update';
+      const result = execSync(command, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
+      
+      return {
+        content: [{
+          type: "text",
+          text: `🔄 **Helm Repositories Updated**\n\n` +
+                `**Output**:\n\`\`\`\n${result}\n\`\`\``
+        }]
+      };
+    } catch (error) {
+      throw new Error(`Helm repo update failed: ${error.message}`);
+    }
+  }
+
+  // 🎯 kubectl Methods
+  async kubectlGet(args) {
+    const { resource, namespace, name, allNamespaces = false, selector, output = 'wide' } = args;
+    
+    try {
+      let command = `kubectl get ${resource}`;
+      
+      if (name) {
+        command += ` ${name}`;
+      }
+      
+      if (allNamespaces) {
+        command += ' --all-namespaces';
+      } else if (namespace) {
+        command += ` --namespace ${namespace}`;
+      }
+      
+      if (selector) {
+        command += ` --selector ${selector}`;
+      }
+      
+      if (output) {
+        command += ` --output ${output}`;
+      }
+      
+      const result = execSync(command, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
+      
+      return {
+        content: [{
+          type: "text",
+          text: `📋 **kubectl get ${resource}**\n\n` +
+                `**Namespace**: ${allNamespaces ? 'All namespaces' : namespace || 'default'}\n` +
+                `**Output Format**: ${output}\n\n` +
+                `**Result**:\n\`\`\`\n${result}\n\`\`\``
+        }]
+      };
+    } catch (error) {
+      throw new Error(`kubectl get failed: ${error.message}`);
+    }
+  }
+
+  async kubectlDescribe(args) {
+    const { resource, name, namespace } = args;
+    
+    try {
+      let command = `kubectl describe ${resource} ${name}`;
+      
+      if (namespace) {
+        command += ` --namespace ${namespace}`;
+      }
+      
+      const result = execSync(command, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
+      
+      return {
+        content: [{
+          type: "text",
+          text: `📖 **kubectl describe ${resource} ${name}**\n\n` +
+                `**Namespace**: ${namespace || 'default'}\n\n` +
+                `**Details**:\n\`\`\`\n${result}\n\`\`\``
+        }]
+      };
+    } catch (error) {
+      throw new Error(`kubectl describe failed: ${error.message}`);
+    }
+  }
+
+  async kubectlLogs(args) {
+    const { podName, namespace, container, follow = false, previous = false, tail, since } = args;
+    
+    try {
+      let command = `kubectl logs ${podName}`;
+      
+      if (namespace) {
+        command += ` --namespace ${namespace}`;
+      }
+      
+      if (container) {
+        command += ` --container ${container}`;
+      }
+      
+      if (previous) {
+        command += ' --previous';
+      }
+      
+      if (tail) {
+        command += ` --tail ${tail}`;
+      }
+      
+      if (since) {
+        command += ` --since ${since}`;
+      }
+      
+      // Don't use follow in execSync as it would hang
+      if (follow) {
+        return {
+          content: [{
+            type: "text",
+            text: `📜 **Following logs for ${podName}**\n\n` +
+                  `**Note**: Follow mode requires interactive session. Use: \`kubectl logs ${podName} -f\``
+          }]
+        };
+      }
+      
+      const result = execSync(command, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
+      
+      return {
+        content: [{
+          type: "text",
+          text: `📜 **kubectl logs ${podName}**\n\n` +
+                `**Namespace**: ${namespace || 'default'}\n` +
+                `**Container**: ${container || 'default'}\n\n` +
+                `**Logs**:\n\`\`\`\n${result}\n\`\`\``
+        }]
+      };
+    } catch (error) {
+      throw new Error(`kubectl logs failed: ${error.message}`);
+    }
+  }
+
+  async kubectlExec(args) {
+    const { podName, namespace, container, command, interactive = false } = args;
+    
+    try {
+      let kubectlCmd = `kubectl exec ${podName}`;
+      
+      if (namespace) {
+        kubectlCmd += ` --namespace ${namespace}`;
+      }
+      
+      if (container) {
+        kubectlCmd += ` --container ${container}`;
+      }
+      
+      if (interactive) {
+        kubectlCmd += ' -it';
+      }
+      
+      kubectlCmd += ` -- ${command.join(' ')}`;
+      
+      const result = execSync(kubectlCmd, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
+      
+      return {
+        content: [{
+          type: "text",
+          text: `🔧 **kubectl exec ${podName}**\n\n` +
+                `**Command**: ${command.join(' ')}\n` +
+                `**Namespace**: ${namespace || 'default'}\n\n` +
+                `**Output**:\n\`\`\`\n${result}\n\`\`\``
+        }]
+      };
+    } catch (error) {
+      throw new Error(`kubectl exec failed: ${error.message}`);
+    }
+  }
+
+  async kubectlApply(args) {
+    const { filename, namespace, recursive = false, dryRun = false } = args;
+    
+    try {
+      let command = `kubectl apply -f ${filename}`;
+      
+      if (namespace) {
+        command += ` --namespace ${namespace}`;
+      }
+      
+      if (recursive) {
+        command += ' --recursive';
+      }
+      
+      if (dryRun) {
+        command += ' --dry-run=client';
+      }
+      
+      const result = execSync(command, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
+      
+      return {
+        content: [{
+          type: "text",
+          text: `⚡ **kubectl apply**\n\n` +
+                `**File**: ${filename}\n` +
+                `**Namespace**: ${namespace || 'default'}\n` +
+                `**Dry Run**: ${dryRun ? 'Yes' : 'No'}\n\n` +
+                `**Result**:\n\`\`\`\n${result}\n\`\`\``
+        }]
+      };
+    } catch (error) {
+      throw new Error(`kubectl apply failed: ${error.message}`);
+    }
+  }
+
+  async kubectlDelete(args) {
+    const { resource, name, namespace, filename, force = false, gracePeriod } = args;
+    
+    try {
+      let command;
+      
+      if (filename) {
+        command = `kubectl delete -f ${filename}`;
+      } else if (resource && name) {
+        command = `kubectl delete ${resource} ${name}`;
+      } else {
+        throw new Error('Either filename or (resource + name) must be provided');
+      }
+      
+      if (namespace) {
+        command += ` --namespace ${namespace}`;
+      }
+      
+      if (force) {
+        command += ' --force';
+      }
+      
+      if (gracePeriod !== undefined) {
+        command += ` --grace-period=${gracePeriod}`;
+      }
+      
+      const result = execSync(command, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
+      
+      return {
+        content: [{
+          type: "text",
+          text: `🗑️ **kubectl delete**\n\n` +
+                `**Target**: ${filename || `${resource}/${name}`}\n` +
+                `**Namespace**: ${namespace || 'default'}\n\n` +
+                `**Result**:\n\`\`\`\n${result}\n\`\`\``
+        }]
+      };
+    } catch (error) {
+      throw new Error(`kubectl delete failed: ${error.message}`);
+    }
+  }
+
+  async kubectlScale(args) {
+    const { resource, name, namespace, replicas } = args;
+    
+    try {
+      let command = `kubectl scale ${resource} ${name} --replicas=${replicas}`;
+      
+      if (namespace) {
+        command += ` --namespace ${namespace}`;
+      }
+      
+      const result = execSync(command, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
+      
+      return {
+        content: [{
+          type: "text",
+          text: `📏 **kubectl scale**\n\n` +
+                `**Resource**: ${resource}/${name}\n` +
+                `**Replicas**: ${replicas}\n` +
+                `**Namespace**: ${namespace || 'default'}\n\n` +
+                `**Result**:\n\`\`\`\n${result}\n\`\`\``
+        }]
+      };
+    } catch (error) {
+      throw new Error(`kubectl scale failed: ${error.message}`);
+    }
+  }
+
+  async kubectlRollout(args) {
+    const { action, resource, name, namespace, revision } = args;
+    
+    try {
+      let command = `kubectl rollout ${action} ${resource}/${name}`;
+      
+      if (namespace) {
+        command += ` --namespace ${namespace}`;
+      }
+      
+      if (action === 'undo' && revision) {
+        command += ` --to-revision=${revision}`;
+      }
+      
+      const result = execSync(command, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
+      
+      return {
+        content: [{
+          type: "text",
+          text: `🔄 **kubectl rollout ${action}**\n\n` +
+                `**Resource**: ${resource}/${name}\n` +
+                `**Namespace**: ${namespace || 'default'}\n` +
+                `${revision ? `**Revision**: ${revision}\n` : ''}` +
+                `\n**Result**:\n\`\`\`\n${result}\n\`\`\``
+        }]
+      };
+    } catch (error) {
+      throw new Error(`kubectl rollout failed: ${error.message}`);
+    }
+  }
+
+  async kubectlPortForward(args) {
+    const { resource, namespace, ports, background = false } = args;
+    
+    try {
+      let command = `kubectl port-forward ${resource} ${ports}`;
+      
+      if (namespace) {
+        command += ` --namespace ${namespace}`;
+      }
+      
+      if (background) {
+        command += ' &';
+        execSync(command, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
+        
+        return {
+          content: [{
+            type: "text",
+            text: `🌐 **kubectl port-forward (Background)**\n\n` +
+                  `**Resource**: ${resource}\n` +
+                  `**Ports**: ${ports}\n` +
+                  `**Namespace**: ${namespace || 'default'}\n\n` +
+                  `**Status**: Running in background\n` +
+                  `**Access**: http://localhost:${ports.split(':')[0]}`
+          }]
+        };
+      } else {
+        return {
+          content: [{
+            type: "text",
+            text: `🌐 **kubectl port-forward**\n\n` +
+                  `**Resource**: ${resource}\n` +
+                  `**Ports**: ${ports}\n` +
+                  `**Namespace**: ${namespace || 'default'}\n\n` +
+                  `**Note**: Interactive port-forward requires terminal session.\n` +
+                  `**Command**: \`${command}\``
+          }]
+        };
+      }
+    } catch (error) {
+      throw new Error(`kubectl port-forward failed: ${error.message}`);
+    }
+  }
+
+  async kubectlTop(args) {
+    const { resource, namespace, allNamespaces = false, selector } = args;
+    
+    try {
+      let command = `kubectl top ${resource}`;
+      
+      if (allNamespaces) {
+        command += ' --all-namespaces';
+      } else if (namespace) {
+        command += ` --namespace ${namespace}`;
+      }
+      
+      if (selector) {
+        command += ` --selector ${selector}`;
+      }
+      
+      const result = execSync(command, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
+      
+      return {
+        content: [{
+          type: "text",
+          text: `📊 **kubectl top ${resource}**\n\n` +
+                `**Namespace**: ${allNamespaces ? 'All namespaces' : namespace || 'default'}\n\n` +
+                `**Resource Usage**:\n\`\`\`\n${result}\n\`\`\``
+        }]
+      };
+    } catch (error) {
+      throw new Error(`kubectl top failed: ${error.message}`);
+    }
+  }
+
+  async kubectlPatch(args) {
+    const { resource, name, namespace, patch, type = 'strategic' } = args;
+    
+    try {
+      let command = `kubectl patch ${resource} ${name} --type ${type} --patch '${patch}'`;
+      
+      if (namespace) {
+        command += ` --namespace ${namespace}`;
+      }
+      
+      const result = execSync(command, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
+      
+      return {
+        content: [{
+          type: "text",
+          text: `🔧 **kubectl patch**\n\n` +
+                `**Resource**: ${resource}/${name}\n` +
+                `**Patch Type**: ${type}\n` +
+                `**Namespace**: ${namespace || 'default'}\n\n` +
+                `**Patch**:\n\`\`\`json\n${patch}\n\`\`\`\n\n` +
+                `**Result**:\n\`\`\`\n${result}\n\`\`\``
+        }]
+      };
+    } catch (error) {
+      throw new Error(`kubectl patch failed: ${error.message}`);
+    }
+  }
+
+  async kubectlCreate(args) {
+    const { resource, name, namespace, filename, options = {} } = args;
+    
+    try {
+      let command;
+      
+      if (filename) {
+        command = `kubectl create -f ${filename}`;
+      } else if (resource && name) {
+        command = `kubectl create ${resource} ${name}`;
+        
+        // Add common options for resource creation
+        Object.entries(options).forEach(([key, value]) => {
+          command += ` --${key}=${value}`;
+        });
+      } else {
+        throw new Error('Either filename or (resource + name) must be provided');
+      }
+      
+      if (namespace) {
+        command += ` --namespace ${namespace}`;
+      }
+      
+      const result = execSync(command, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
+      
+      return {
+        content: [{
+          type: "text",
+          text: `➕ **kubectl create**\n\n` +
+                `**Target**: ${filename || `${resource}/${name}`}\n` +
+                `**Namespace**: ${namespace || 'default'}\n\n` +
+                `**Result**:\n\`\`\`\n${result}\n\`\`\``
+        }]
+      };
+    } catch (error) {
+      throw new Error(`kubectl create failed: ${error.message}`);
+    }
+  }
+
+  async kubectlConfig(args) {
+    const { action, context, cluster, user } = args;
+    
+    try {
+      let command = `kubectl config ${action}`;
+      
+      switch (action) {
+        case 'use-context':
+          if (!context) throw new Error('Context name required for use-context');
+          command += ` ${context}`;
+          break;
+        case 'set-context':
+          if (!context) throw new Error('Context name required for set-context');
+          command += ` ${context}`;
+          if (cluster) command += ` --cluster=${cluster}`;
+          if (user) command += ` --user=${user}`;
+          break;
+      }
+      
+      const result = execSync(command, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
+      
+      return {
+        content: [{
+          type: "text",
+          text: `⚙️ **kubectl config ${action}**\n\n` +
+                `${context ? `**Context**: ${context}\n` : ''}` +
+                `${cluster ? `**Cluster**: ${cluster}\n` : ''}` +
+                `${user ? `**User**: ${user}\n` : ''}` +
+                `\n**Result**:\n\`\`\`\n${result}\n\`\`\``
+        }]
+      };
+    } catch (error) {
+      throw new Error(`kubectl config failed: ${error.message}`);
+    }
   }
 
   async run() {
