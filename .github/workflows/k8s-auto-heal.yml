@@ -19,10 +19,9 @@ on:
         type: boolean
 
 env:
-  # ECR Configuration
-  AWS_REGION: us-east-1
-  ECR_REGISTRY: public.ecr.aws/sandeep-soorya-kumar
+  # Docker Image Configuration
   IMAGE_NAME: k8s-auto-heal-mcp
+  IMAGE_TAG: latest
   
   # Kubernetes Configuration
   KUBE_NAMESPACE: monitoring
@@ -90,14 +89,13 @@ jobs:
             echo "⏭️  No deployment needed"
           fi
 
-  # 🏗️ Build and Push Docker Image
+  # 🏗️ Build Docker Image for Kind
   build-and-push:
     needs: detect-changes
     if: needs.detect-changes.outputs.should-deploy == 'true'
     runs-on: ubuntu-latest
     outputs:
       image-tag: ${{ steps.meta.outputs.tags }}
-      image-digest: ${{ steps.build.outputs.digest }}
     steps:
       - name: 📥 Checkout Code
         uses: actions/checkout@v4
@@ -105,47 +103,41 @@ jobs:
       - name: 🐳 Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: 🔐 Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
-
-      - name: 🔑 Login to Amazon ECR Public
-        id: login-ecr-public
-        uses: aws-actions/amazon-ecr-login@v2
-        with:
-          registry-type: public
-
       - name: 🏷️ Extract Metadata
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.ECR_REGISTRY }}/${{ env.IMAGE_NAME }}
+          images: k8s-auto-heal-mcp
           tags: |
             type=ref,event=branch
             type=ref,event=pr
             type=sha,prefix={{branch}}-
             type=raw,value=latest,enable={{is_default_branch}}
 
-      - name: 🏗️ Build and Push Docker Image
+      - name: 🏗️ Build Docker Image
         id: build
         uses: docker/build-push-action@v5
         with:
           context: .
           file: ./k8s-mcp-server/Dockerfile
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
+          push: false
+          tags: k8s-auto-heal-mcp:latest
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          platforms: linux/amd64,linux/arm64
+          outputs: type=docker,dest=/tmp/k8s-auto-heal-mcp.tar
+
+      - name: 📦 Upload Docker Image Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-image
+          path: /tmp/k8s-auto-heal-mcp.tar
+          retention-days: 1
 
       - name: ✅ Image Security Scan
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: ${{ env.ECR_REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+          input: /tmp/k8s-auto-heal-mcp.tar
           format: 'sarif'
           output: 'trivy-results.sarif'
 
@@ -155,7 +147,7 @@ jobs:
         with:
           sarif_file: 'trivy-results.sarif'
 
-  # ☸️ Deploy to Minikube
+  # ☸️ Deploy to Local Kind Cluster
   deploy-to-k8s:
     needs: [detect-changes, build-and-push]
     if: needs.detect-changes.outputs.should-deploy == 'true'
@@ -164,21 +156,62 @@ jobs:
       - name: 📥 Checkout Code
         uses: actions/checkout@v4
 
-      - name: 🔧 Setup Minikube
-        uses: medyagh/setup-minikube@master
+      - name: 🔧 Setup Kind Cluster
+        uses: helm/kind-action@v1
         with:
-          minikube-version: 1.32.0
-          kubernetes-version: 1.28.3
-          driver: docker
-          container-runtime: docker
-          cpus: 2
-          memory: 4096m
+          version: v0.30.0
+          kubernetes_version: v1.34.0
+          cluster_name: k8s-auto-heal
+          config: |
+            kind: Cluster
+            apiVersion: kind.x-k8s.io/v1alpha4
+            name: k8s-auto-heal
+            nodes:
+            - role: control-plane
+              image: kindest/node:v1.34.0
+              extraPortMappings:
+              - containerPort: 80
+                hostPort: 80
+                protocol: TCP
+              - containerPort: 443
+                hostPort: 443
+                protocol: TCP
+              - containerPort: 30000
+                hostPort: 30000
+                protocol: TCP
 
       - name: 🎯 Configure Kubectl Context
         run: |
           kubectl config current-context
           kubectl cluster-info
           kubectl get nodes
+          
+      - name: 📊 Install Metrics Server
+        run: |
+          kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
+          kubectl patch deployment metrics-server -n kube-system --type='json' -p='[
+            {
+              "op": "add",
+              "path": "/spec/template/spec/containers/0/args/-",
+              "value": "--kubelet-insecure-tls"
+            },
+            {
+              "op": "add", 
+              "path": "/spec/template/spec/containers/0/args/-",
+              "value": "--kubelet-preferred-address-types=InternalIP"
+            }
+          ]'
+
+      - name: 📦 Download Docker Image
+        uses: actions/download-artifact@v4
+        with:
+          name: docker-image
+          path: /tmp/
+
+      - name: 🐳 Load Docker Image into Kind
+        run: |
+          docker load --input /tmp/k8s-auto-heal-mcp.tar
+          kind load docker-image k8s-auto-heal-mcp:latest --name k8s-auto-heal
 
       - name: 📦 Setup Helm
         uses: azure/setup-helm@v3
@@ -195,58 +228,39 @@ jobs:
         run: |
           kubectl create namespace ${{ env.KUBE_NAMESPACE }} --dry-run=client -o yaml | kubectl apply -f -
 
-      - name: 🔍 Install Prometheus Stack (if not exists)
+      - name: 🔍 Install Prometheus Stack (Lightweight for CI)
         run: |
-          if ! helm list -n ${{ env.KUBE_NAMESPACE }} | grep -q prometheus; then
-            echo "📊 Installing Prometheus Stack..."
-            helm install prometheus prometheus-community/kube-prometheus-stack \
-              --namespace ${{ env.KUBE_NAMESPACE }} \
-              --version ${{ env.PROMETHEUS_CHART_VERSION }} \
-              --values ./helm/prometheus-values.yaml \
-              --wait --timeout 10m
-          else
-            echo "📊 Prometheus already installed, upgrading..."
-            helm upgrade prometheus prometheus-community/kube-prometheus-stack \
-              --namespace ${{ env.KUBE_NAMESPACE }} \
-              --version ${{ env.PROMETHEUS_CHART_VERSION }} \
-              --values ./helm/prometheus-values.yaml \
-              --wait --timeout 10m
-          fi
+          echo "📊 Installing lightweight Prometheus for CI testing..."
+          helm install prometheus prometheus-community/kube-prometheus-stack \
+            --namespace ${{ env.KUBE_NAMESPACE }} \
+            --set prometheus.prometheusSpec.retention=1h \
+            --set prometheus.prometheusSpec.resources.requests.memory=256Mi \
+            --set prometheus.prometheusSpec.resources.limits.memory=512Mi \
+            --set grafana.enabled=false \
+            --set alertmanager.enabled=false \
+            --wait --timeout 5m
 
-      - name: 🔄 Update Helm Values with New Image
+      - name: 🔄 Update Helm Values for Kind
         run: |
-          # Update the image tag in values.yaml
-          IMAGE_TAG="${{ needs.build-and-push.outputs.image-tag }}"
-          sed -i "s|tag:.*|tag: \"${IMAGE_TAG##*:}\"|g" ./helm/k8s-auto-heal/values.yaml
-          
-          # Update ECR registry
-          sed -i "s|repository:.*|repository: \"${{ env.ECR_REGISTRY }}/${{ env.IMAGE_NAME }}\"|g" ./helm/k8s-auto-heal/values.yaml
+          # Update the image settings for local kind deployment
+          sed -i "s|repository:.*|repository: \"k8s-auto-heal-mcp\"|g" ./helm/k8s-auto-heal/values.yaml
+          sed -i "s|tag:.*|tag: \"latest\"|g" ./helm/k8s-auto-heal/values.yaml
+          sed -i "s|pullPolicy:.*|pullPolicy: \"Never\"|g" ./helm/k8s-auto-heal/values.yaml
 
-      - name: 🚀 Deploy/Upgrade K8s Auto-Heal MCP Server
+      - name: 🚀 Deploy K8s Auto-Heal MCP Server
         run: |
-          if helm list -n ${{ env.KUBE_NAMESPACE }} | grep -q ${{ env.HELM_CHART_NAME }}; then
-            echo "🔄 Upgrading existing deployment..."
-            helm upgrade ${{ env.HELM_CHART_NAME }} ./helm/k8s-auto-heal \
-              --namespace ${{ env.KUBE_NAMESPACE }} \
-              --values ./helm/k8s-auto-heal/values.yaml \
-              --set env.GITHUB_TOKEN="${{ secrets.GITHUB_TOKEN }}" \
-              --set env.GITHUB_OWNER="${{ github.repository_owner }}" \
-              --set env.GITHUB_REPO="${{ github.event.repository.name }}" \
-              --set env.GITHUB_BRANCH="main" \
-              --wait --timeout 10m \
-              --atomic
-          else
-            echo "🆕 Installing new deployment..."
-            helm install ${{ env.HELM_CHART_NAME }} ./helm/k8s-auto-heal \
-              --namespace ${{ env.KUBE_NAMESPACE }} \
-              --values ./helm/k8s-auto-heal/values.yaml \
-              --set env.GITHUB_TOKEN="${{ secrets.GITHUB_TOKEN }}" \
-              --set env.GITHUB_OWNER="${{ github.repository_owner }}" \
-              --set env.GITHUB_REPO="${{ github.event.repository.name }}" \
-              --set env.GITHUB_BRANCH="main" \
-              --wait --timeout 10m \
-              --atomic
-          fi
+          echo "🆕 Installing K8s Auto-Heal MCP Server..."
+          helm install ${{ env.HELM_CHART_NAME }} ./helm/k8s-auto-heal \
+            --namespace ${{ env.KUBE_NAMESPACE }} \
+            --values ./helm/k8s-auto-heal/values.yaml \
+            --set image.repository=k8s-auto-heal-mcp \
+            --set image.tag=latest \
+            --set image.pullPolicy=Never \
+            --set env.GITHUB_TOKEN="${{ secrets.GITHUB_TOKEN }}" \
+            --set env.GITHUB_OWNER="${{ github.repository_owner }}" \
+            --set env.GITHUB_REPO="${{ github.event.repository.name }}" \
+            --set env.GITHUB_BRANCH="main" \
+            --wait --timeout 5m
 
       - name: 🏥 Health Check
         run: |
@@ -275,22 +289,50 @@ jobs:
       - name: 📥 Checkout Code
         uses: actions/checkout@v4
 
-      - name: 🔧 Setup Minikube
-        uses: medyagh/setup-minikube@master
+      - name: 📦 Download Docker Image
+        uses: actions/download-artifact@v4
         with:
-          minikube-version: 1.32.0
-          kubernetes-version: 1.28.3
-          driver: docker
+          name: docker-image
+          path: /tmp/
+
+      - name: 🔧 Setup Kind for Integration Tests
+        uses: helm/kind-action@v1
+        with:
+          version: v0.30.0
+          kubernetes_version: v1.34.0
+          cluster_name: k8s-test
+          config: |
+            kind: Cluster
+            apiVersion: kind.x-k8s.io/v1alpha4
+            name: k8s-test
+
+      - name: 🐳 Load Test Image into Kind
+        run: |
+          docker load --input /tmp/k8s-auto-heal-mcp.tar
+          kind load docker-image k8s-auto-heal-mcp:latest --name k8s-test
 
       - name: 🧪 Run Integration Tests
         run: |
-          # Test MCP Server Health
-          kubectl port-forward svc/k8s-auto-heal ${{ env.MCP_SERVER_PORT }}:${{ env.MCP_SERVER_PORT }} -n ${{ env.KUBE_NAMESPACE }} &
-          sleep 10
+          # Deploy a test instance
+          kubectl create namespace test-monitoring
+          helm install test-k8s-auto-heal ./helm/k8s-auto-heal \
+            --namespace test-monitoring \
+            --set image.repository=k8s-auto-heal-mcp \
+            --set image.tag=latest \
+            --set image.pullPolicy=Never \
+            --set env.GITHUB_TOKEN="${{ secrets.GITHUB_TOKEN }}" \
+            --wait --timeout 3m
           
-          # Test MCP endpoints
-          curl -f http://localhost:${{ env.MCP_SERVER_PORT }}/health || exit 1
-          curl -f http://localhost:${{ env.MCP_SERVER_PORT }}/metrics || exit 1
+          # Wait for pod to be ready
+          kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=k8s-auto-heal -n test-monitoring --timeout=120s
+          
+          # Test health endpoint via port-forward
+          kubectl port-forward svc/test-k8s-auto-heal 8080:8080 -n test-monitoring &
+          sleep 5
+          
+          # Test endpoints
+          curl -f http://localhost:8080/health || exit 1
+          curl -f http://localhost:8080/metrics || exit 1
           
           echo "✅ Integration tests passed!"
 
@@ -302,7 +344,7 @@ jobs:
           kind: Pod
           metadata:
             name: oom-test-pod
-            namespace: ${{ env.KUBE_NAMESPACE }}
+            namespace: test-monitoring
             labels:
               test: oom-simulation
           spec:
@@ -317,8 +359,11 @@ jobs:
                   memory: "10Mi"
           EOF
           
-          # Wait and check if our MCP server detects and handles it
-          sleep 60
+          # Wait for OOM to occur
+          sleep 30
+          
+          # Check if pod was OOMKilled
+          kubectl get pod oom-test-pod -n test-monitoring -o jsonpath='{.status.containerStatuses[0].lastState.terminated.reason}' | grep -q "OOMKilled" && echo "✅ OOM simulation successful" || echo "⚠️ OOM not detected yet"
           
           echo "🧪 OOM simulation completed"
 
