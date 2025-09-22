@@ -1,0 +1,28 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "k8s-auto-heal.fullname" . }}-config
+  labels:
+    {{- include "k8s-auto-heal.labels" . | nindent 4 }}
+data:
+  config.yaml: |
+    {{- with .Values.config }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  
+  monitoring.yaml: |
+    monitoring:
+      enabled: {{ .Values.monitoring.enabled }}
+      interval: {{ .Values.env.MONITORING_INTERVAL | default "30" }}s
+      prometheus:
+        url: {{ .Values.env.PROMETHEUS_URL | default "http://prometheus:9090" }}
+    
+    autoHeal:
+      enabled: {{ .Values.env.AUTO_HEAL_ENABLED | default "true" }}
+      resourceMultiplier: {{ .Values.env.RESOURCE_MULTIPLIER | default "1.5" }}
+      maxResourceIncrease: {{ .Values.env.MAX_RESOURCE_INCREASE | default "5.0" }}
+    
+    notifications:
+      {{- with .Values.notifications }}
+      {{- toYaml . | nindent 6 }}
+      {{- end }}

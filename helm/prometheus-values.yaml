@@ -1,0 +1,206 @@
+# 📊 Prometheus Configuration for K8s Auto-Heal Monitoring
+
+# Global configuration
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+# Prometheus server configuration
+prometheus:
+  prometheusSpec:
+    retention: 15d
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: standard
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 10Gi
+    
+    # Resource limits
+    resources:
+      limits:
+        cpu: 2000m
+        memory: 4Gi
+      requests:
+        cpu: 100m
+        memory: 512Mi
+    
+    # Additional scrape configs for K8s Auto-Heal
+    additionalScrapeConfigs:
+      - job_name: 'k8s-auto-heal'
+        kubernetes_sd_configs:
+          - role: pod
+            namespaces:
+              names:
+                - monitoring
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_name]
+            action: keep
+            regex: k8s-auto-heal
+          - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+            action: keep
+            regex: true
+          - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
+            action: replace
+            target_label: __metrics_path__
+            regex: (.+)
+          - source_labels: [__address__, __meta_kubernetes_pod_annotation_prometheus_io_port]
+            action: replace
+            regex: ([^:]+)(?::\d+)?;(\d+)
+            replacement: $1:$2
+            target_label: __address__
+
+# Grafana configuration
+grafana:
+  enabled: true
+  adminPassword: admin
+  
+  # Grafana resources
+  resources:
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+    requests:
+      cpu: 100m
+      memory: 128Mi
+  
+  # Enable persistence
+  persistence:
+    enabled: true
+    size: 1Gi
+  
+  # Dashboards
+  dashboardProviders:
+    dashboardproviders.yaml:
+      apiVersion: 1
+      providers:
+      - name: 'k8s-auto-heal'
+        orgId: 1
+        folder: 'K8s Auto-Heal'
+        type: file
+        disableDeletion: false
+        editable: true
+        options:
+          path: /var/lib/grafana/dashboards/k8s-auto-heal
+  
+  dashboards:
+    k8s-auto-heal:
+      k8s-cluster-health:
+        gnetId: 7249
+        revision: 1
+        datasource: Prometheus
+      k8s-pod-monitoring:
+        gnetId: 6417
+        revision: 1
+        datasource: Prometheus
+
+# AlertManager configuration
+alertmanager:
+  enabled: true
+  
+  alertmanagerSpec:
+    resources:
+      limits:
+        cpu: 500m
+        memory: 512Mi
+      requests:
+        cpu: 50m
+        memory: 64Mi
+    
+    # Alert routing
+    config:
+      global:
+        smtp_smarthost: 'localhost:587'
+        smtp_from: 'k8s-alerts@your-domain.com'
+      
+      route:
+        group_by: ['alertname']
+        group_wait: 10s
+        group_interval: 10s
+        repeat_interval: 1h
+        receiver: 'web.hook'
+      
+      receivers:
+        - name: 'web.hook'
+          webhook_configs:
+            - url: 'http://k8s-auto-heal:3000/webhook/alerts'
+              send_resolved: true
+
+# Node Exporter
+nodeExporter:
+  enabled: true
+  
+# Kube State Metrics
+kubeStateMetrics:
+  enabled: true
+
+# Prometheus Operator
+prometheusOperator:
+  enabled: true
+  
+  # Resource limits
+  resources:
+    limits:
+      cpu: 500m
+      memory: 512Mi
+    requests:
+      cpu: 100m
+      memory: 128Mi
+
+# Additional monitoring rules
+additionalPrometheusRules:
+  - name: k8s-auto-heal-rules
+    groups:
+      - name: k8s.auto-heal
+        rules:
+          - alert: PodCrashLooping
+            expr: rate(kube_pod_container_status_restarts_total[15m]) * 60 * 15 > 5
+            for: 5m
+            labels:
+              severity: warning
+              service: k8s-auto-heal
+            annotations:
+              summary: "Pod {{ $labels.pod }} is crash looping"
+              description: "Pod {{ $labels.pod }} in namespace {{ $labels.namespace }} has restarted {{ $value }} times in the last 15 minutes."
+          
+          - alert: PodOOMKilled
+            expr: increase(kube_pod_container_status_terminated_reason{reason="OOMKilled"}[5m]) > 0
+            for: 0m
+            labels:
+              severity: critical
+              service: k8s-auto-heal
+            annotations:
+              summary: "Pod {{ $labels.pod }} was OOMKilled"
+              description: "Pod {{ $labels.pod }} in namespace {{ $labels.namespace }} was killed due to out of memory."
+          
+          - alert: PodPending
+            expr: kube_pod_status_phase{phase="Pending"} == 1
+            for: 10m
+            labels:
+              severity: warning
+              service: k8s-auto-heal
+            annotations:
+              summary: "Pod {{ $labels.pod }} is pending"
+              description: "Pod {{ $labels.pod }} in namespace {{ $labels.namespace }} has been in pending state for more than 10 minutes."
+          
+          - alert: HighMemoryUsage
+            expr: (container_memory_usage_bytes / container_spec_memory_limit_bytes) * 100 > 80
+            for: 5m
+            labels:
+              severity: warning
+              service: k8s-auto-heal
+            annotations:
+              summary: "High memory usage for container {{ $labels.container }}"
+              description: "Container {{ $labels.container }} in pod {{ $labels.pod }} is using {{ $value }}% of its memory limit."
+          
+          - alert: HighCPUUsage
+            expr: (rate(container_cpu_usage_seconds_total[5m]) / container_spec_cpu_quota * container_spec_cpu_period) * 100 > 80
+            for: 5m
+            labels:
+              severity: warning
+              service: k8s-auto-heal
+            annotations:
+              summary: "High CPU usage for container {{ $labels.container }}"
+              description: "Container {{ $labels.container }} in pod {{ $labels.pod }} is using {{ $value }}% of its CPU limit."

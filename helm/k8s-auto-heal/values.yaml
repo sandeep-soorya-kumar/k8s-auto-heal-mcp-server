@@ -1,0 +1,191 @@
+# 🚀 K8s Auto-Heal MCP Server Configuration
+
+# 🏷️ Image configuration
+image:
+  repository: public.ecr.aws/your-namespace/k8s-auto-heal-mcp
+  tag: "latest"
+  pullPolicy: IfNotPresent
+
+# 🔐 Image pull secrets
+imagePullSecrets: []
+
+# 🏷️ Service account
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+# 🔐 Pod security context
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1001
+  runAsGroup: 1001
+  fsGroup: 1001
+
+# 🔐 Container security context
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+    - ALL
+  readOnlyRootFilesystem: true
+  runAsNonRoot: true
+  runAsUser: 1001
+
+# 🌐 Service configuration
+service:
+  type: ClusterIP
+  port: 3000
+  targetPort: 3000
+  annotations: {}
+
+# 🌐 Ingress configuration
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: k8s-auto-heal.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+# 📊 Resource limits and requests
+resources:
+  limits:
+    cpu: 1000m
+    memory: 512Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi
+
+# 🔄 Autoscaling configuration
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 3
+  targetCPUUtilizationPercentage: 80
+  targetMemoryUtilizationPercentage: 80
+
+# 📍 Node selector
+nodeSelector: {}
+
+# 🏷️ Tolerations
+tolerations: []
+
+# 📍 Affinity rules
+affinity: {}
+
+# 🔄 Replica count
+replicaCount: 1
+
+# 🏥 Health checks
+livenessProbe:
+  httpGet:
+    path: /health
+    port: 8080
+  initialDelaySeconds: 30
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3
+
+readinessProbe:
+  httpGet:
+    path: /health
+    port: 8080
+  initialDelaySeconds: 5
+  periodSeconds: 5
+  timeoutSeconds: 3
+  failureThreshold: 3
+
+# 🔧 Environment variables
+env:
+  MONITORING_INTERVAL: "30"
+  AUTO_HEAL_ENABLED: "true"
+  RESOURCE_MULTIPLIER: "1.5"
+  MAX_RESOURCE_INCREASE: "5.0"
+  PROMETHEUS_URL: "http://prometheus:9090"
+  MCP_SERVER_PORT: "3000"
+  NODE_ENV: "production"
+
+# 📊 Monitoring configuration
+monitoring:
+  enabled: true
+  serviceMonitor:
+    enabled: true
+    interval: 30s
+    scrapeTimeout: 10s
+    labels: {}
+    annotations: {}
+
+# 🔐 RBAC configuration
+rbac:
+  create: true
+  rules:
+    - apiGroups: [""]
+      resources: ["pods", "pods/log", "events"]
+      verbs: ["get", "list", "watch"]
+    - apiGroups: ["apps"]
+      resources: ["deployments", "replicasets"]
+      verbs: ["get", "list", "watch", "update", "patch"]
+    - apiGroups: ["metrics.k8s.io"]
+      resources: ["pods", "nodes"]
+      verbs: ["get", "list"]
+
+# 📦 Persistent volume configuration
+persistence:
+  enabled: false
+  storageClass: ""
+  accessMode: ReadWriteOnce
+  size: 1Gi
+  annotations: {}
+
+# 🔧 Configuration files
+config:
+  # Auto-healing policies
+  autoHeal:
+    oomKilled:
+      enabled: true
+      memoryMultiplier: 1.5
+      maxMemoryIncrease: 5.0
+    crashLoopBackOff:
+      enabled: true
+      restartThreshold: 5
+    podPending:
+      enabled: true
+      timeoutMinutes: 10
+  
+  # Monitoring settings
+  monitoring:
+    scanInterval: 30
+    retentionDays: 7
+    alertThresholds:
+      highRestartCount: 5
+      lowMemoryLimit: "128Mi"
+      noCpuLimit: true
+
+# 📧 Notifications
+notifications:
+  enabled: false
+  slack:
+    webhook: ""
+    channel: "#alerts"
+  email:
+    enabled: false
+    smtp:
+      host: ""
+      port: 587
+      username: ""
+      password: ""
+
+# 🧪 Testing configuration
+testing:
+  enabled: false
+  chaos:
+    enabled: false
+    interval: "1h"
+  loadTesting:
+    enabled: false
+    requests: 100
+    concurrency: 10

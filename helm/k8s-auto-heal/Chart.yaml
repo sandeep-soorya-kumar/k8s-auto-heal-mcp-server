@@ -1,0 +1,22 @@
+apiVersion: v2
+name: k8s-auto-heal
+description: 🚀 AI-powered Kubernetes cluster auto-healing and optimization
+type: application
+version: 1.0.0
+appVersion: "1.0.0"
+keywords:
+  - kubernetes
+  - monitoring
+  - auto-healing
+  - mcp
+  - ai
+  - devops
+home: https://github.com/your-org/k8s-auto-heal-mcp-server
+sources:
+  - https://github.com/your-org/k8s-auto-heal-mcp-server
+maintainers:
+  - name: AI DevOps Team
+    email: devops@your-org.com
+annotations:
+  category: Monitoring
+  licenses: MIT

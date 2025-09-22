@@ -1,0 +1,68 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Git Status (MCP)",
+      "type": "shell",
+      "command": "node",
+      "args": ["-e", "import('./git-cicd-server.js').then(() => console.log('MCP Server loaded'))"],
+      "group": "build",
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "focus": false,
+        "panel": "shared"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Start HTTP MCP Server",
+      "type": "shell",
+      "command": "node",
+      "args": ["simple-http-server.js"],
+      "group": "build",
+      "isBackground": true,
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "focus": false,
+        "panel": "shared"
+      },
+      "problemMatcher": {
+        "pattern": {
+          "regexp": "^(.*)$",
+          "file": 1
+        },
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": "Git CI/CD HTTP Server running",
+          "endsPattern": "Health check:"
+        }
+      }
+    },
+    {
+      "label": "Test MCP Server",
+      "type": "shell",
+      "command": "curl",
+      "args": ["-X", "POST", "http://localhost:3000/execute", "-H", "Content-Type: application/json", "-d", "{\"tool\": \"git-status\", \"arguments\": {}}"],
+      "group": "test",
+      "dependsOn": "Start HTTP MCP Server",
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "focus": false,
+        "panel": "shared"
+      },
+      "problemMatcher": []
+    }
+  ]
+}
+
+
+
+
+
+
+
+
+

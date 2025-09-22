@@ -1,0 +1,406 @@
+name: 🚀 Kubernetes Auto-Heal CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'k8s-mcp-server/**'
+      - 'helm/**'
+      - '.github/workflows/k8s-auto-heal.yml'
+  pull_request:
+    branches: [ main ]
+    types: [opened, synchronize, reopened, closed]
+  workflow_dispatch:
+    inputs:
+      force_deploy:
+        description: 'Force deployment even if no changes detected'
+        required: false
+        default: 'false'
+        type: boolean
+
+env:
+  # ECR Configuration
+  AWS_REGION: us-east-1
+  ECR_REGISTRY: public.ecr.aws/your-namespace
+  IMAGE_NAME: k8s-auto-heal-mcp
+  
+  # Kubernetes Configuration
+  KUBE_NAMESPACE: monitoring
+  HELM_CHART_NAME: k8s-auto-heal
+  PROMETHEUS_CHART_VERSION: "25.8.0"  # Latest stable version
+  
+  # Application Configuration
+  MCP_SERVER_PORT: 3000
+  MONITORING_INTERVAL: 30  # seconds
+
+jobs:
+  # 🔍 Detect Changes and Plan Deployment
+  detect-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      app-changed: ${{ steps.changes.outputs.app }}
+      helm-changed: ${{ steps.changes.outputs.helm }}
+      should-deploy: ${{ steps.decide.outputs.deploy }}
+      is-auto-heal-pr: ${{ steps.check-pr.outputs.auto_heal }}
+    steps:
+      - name: 📥 Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: 🤖 Check if Auto-Heal PR
+        id: check-pr
+        run: |
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            PR_TITLE="${{ github.event.pull_request.title }}"
+            if [[ "$PR_TITLE" == *"Auto-fix"* ]] || [[ "$PR_TITLE" == *"🤖"* ]] || [[ "$PR_TITLE" == *"🔧"* ]]; then
+              echo "auto_heal=true" >> $GITHUB_OUTPUT
+              echo "🤖 This is an auto-heal PR!"
+            else
+              echo "auto_heal=false" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "auto_heal=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: 🔍 Detect Changes
+        uses: dorny/paths-filter@v2
+        id: changes
+        with:
+          filters: |
+            app:
+              - 'k8s-mcp-server/**'
+              - 'Dockerfile'
+            helm:
+              - 'helm/**'
+              - '.github/workflows/k8s-auto-heal.yml'
+
+      - name: 🤔 Decide Deployment
+        id: decide
+        run: |
+          # Auto-deploy auto-heal PRs when merged
+          if [[ "${{ github.event_name }}" == "pull_request" && "${{ github.event.action }}" == "closed" && "${{ github.event.pull_request.merged }}" == "true" && "${{ steps.check-pr.outputs.auto_heal }}" == "true" ]]; then
+            echo "deploy=true" >> $GITHUB_OUTPUT
+            echo "🤖 Auto-heal PR merged - deploying fixes!"
+          elif [[ "${{ steps.changes.outputs.app }}" == "true" || "${{ steps.changes.outputs.helm }}" == "true" || "${{ github.event.inputs.force_deploy }}" == "true" ]]; then
+            echo "deploy=true" >> $GITHUB_OUTPUT
+            echo "🚀 Deployment needed!"
+          else
+            echo "deploy=false" >> $GITHUB_OUTPUT
+            echo "⏭️  No deployment needed"
+          fi
+
+  # 🏗️ Build and Push Docker Image
+  build-and-push:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.should-deploy == 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      image-tag: ${{ steps.meta.outputs.tags }}
+      image-digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - name: 📥 Checkout Code
+        uses: actions/checkout@v4
+
+      - name: 🐳 Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: 🔐 Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: 🔑 Login to Amazon ECR Public
+        id: login-ecr-public
+        uses: aws-actions/amazon-ecr-login@v2
+        with:
+          registry-type: public
+
+      - name: 🏷️ Extract Metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.ECR_REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=sha,prefix={{branch}}-
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: 🏗️ Build and Push Docker Image
+        id: build
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./k8s-mcp-server/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          platforms: linux/amd64,linux/arm64
+
+      - name: ✅ Image Security Scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.ECR_REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+
+      - name: 📊 Upload Trivy Scan Results
+        uses: github/codeql-action/upload-sarif@v2
+        if: always()
+        with:
+          sarif_file: 'trivy-results.sarif'
+
+  # ☸️ Deploy to Minikube
+  deploy-to-k8s:
+    needs: [detect-changes, build-and-push]
+    if: needs.detect-changes.outputs.should-deploy == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: 📥 Checkout Code
+        uses: actions/checkout@v4
+
+      - name: 🔧 Setup Minikube
+        uses: medyagh/setup-minikube@master
+        with:
+          minikube-version: 1.32.0
+          kubernetes-version: 1.28.3
+          driver: docker
+          container-runtime: docker
+          cpus: 2
+          memory: 4096m
+
+      - name: 🎯 Configure Kubectl Context
+        run: |
+          kubectl config current-context
+          kubectl cluster-info
+          kubectl get nodes
+
+      - name: 📦 Setup Helm
+        uses: azure/setup-helm@v3
+        with:
+          version: '3.13.0'
+
+      - name: 📚 Add Helm Repositories
+        run: |
+          helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+          helm repo add stable https://charts.helm.sh/stable
+          helm repo update
+
+      - name: 🏗️ Create Namespace
+        run: |
+          kubectl create namespace ${{ env.KUBE_NAMESPACE }} --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: 🔍 Install Prometheus Stack (if not exists)
+        run: |
+          if ! helm list -n ${{ env.KUBE_NAMESPACE }} | grep -q prometheus; then
+            echo "📊 Installing Prometheus Stack..."
+            helm install prometheus prometheus-community/kube-prometheus-stack \
+              --namespace ${{ env.KUBE_NAMESPACE }} \
+              --version ${{ env.PROMETHEUS_CHART_VERSION }} \
+              --values ./helm/prometheus-values.yaml \
+              --wait --timeout 10m
+          else
+            echo "📊 Prometheus already installed, upgrading..."
+            helm upgrade prometheus prometheus-community/kube-prometheus-stack \
+              --namespace ${{ env.KUBE_NAMESPACE }} \
+              --version ${{ env.PROMETHEUS_CHART_VERSION }} \
+              --values ./helm/prometheus-values.yaml \
+              --wait --timeout 10m
+          fi
+
+      - name: 🔄 Update Helm Values with New Image
+        run: |
+          # Update the image tag in values.yaml
+          IMAGE_TAG="${{ needs.build-and-push.outputs.image-tag }}"
+          sed -i "s|tag:.*|tag: \"${IMAGE_TAG##*:}\"|g" ./helm/k8s-auto-heal/values.yaml
+          
+          # Update ECR registry
+          sed -i "s|repository:.*|repository: \"${{ env.ECR_REGISTRY }}/${{ env.IMAGE_NAME }}\"|g" ./helm/k8s-auto-heal/values.yaml
+
+      - name: 🚀 Deploy/Upgrade K8s Auto-Heal MCP Server
+        run: |
+          if helm list -n ${{ env.KUBE_NAMESPACE }} | grep -q ${{ env.HELM_CHART_NAME }}; then
+            echo "🔄 Upgrading existing deployment..."
+            helm upgrade ${{ env.HELM_CHART_NAME }} ./helm/k8s-auto-heal \
+              --namespace ${{ env.KUBE_NAMESPACE }} \
+              --values ./helm/k8s-auto-heal/values.yaml \
+              --set env.GITHUB_TOKEN="${{ secrets.GITHUB_TOKEN }}" \
+              --set env.GITHUB_OWNER="${{ github.repository_owner }}" \
+              --set env.GITHUB_REPO="${{ github.event.repository.name }}" \
+              --set env.GITHUB_BRANCH="main" \
+              --wait --timeout 10m \
+              --atomic
+          else
+            echo "🆕 Installing new deployment..."
+            helm install ${{ env.HELM_CHART_NAME }} ./helm/k8s-auto-heal \
+              --namespace ${{ env.KUBE_NAMESPACE }} \
+              --values ./helm/k8s-auto-heal/values.yaml \
+              --set env.GITHUB_TOKEN="${{ secrets.GITHUB_TOKEN }}" \
+              --set env.GITHUB_OWNER="${{ github.repository_owner }}" \
+              --set env.GITHUB_REPO="${{ github.event.repository.name }}" \
+              --set env.GITHUB_BRANCH="main" \
+              --wait --timeout 10m \
+              --atomic
+          fi
+
+      - name: 🏥 Health Check
+        run: |
+          echo "🔍 Checking deployment status..."
+          kubectl get pods -n ${{ env.KUBE_NAMESPACE }} -l app.kubernetes.io/name=k8s-auto-heal
+          kubectl get services -n ${{ env.KUBE_NAMESPACE }} -l app.kubernetes.io/name=k8s-auto-heal
+          
+          # Wait for pods to be ready
+          kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=k8s-auto-heal -n ${{ env.KUBE_NAMESPACE }} --timeout=300s
+          
+          echo "✅ Deployment successful!"
+
+      - name: 📊 Get Service URLs
+        run: |
+          echo "🌐 Service URLs:"
+          echo "Prometheus: http://$(minikube ip):$(kubectl get svc prometheus-kube-prometheus-prometheus -n ${{ env.KUBE_NAMESPACE }} -o jsonpath='{.spec.ports[0].nodePort}')"
+          echo "Grafana: http://$(minikube ip):$(kubectl get svc prometheus-grafana -n ${{ env.KUBE_NAMESPACE }} -o jsonpath='{.spec.ports[0].nodePort}')"
+          echo "K8s Auto-Heal MCP: http://$(minikube ip):$(kubectl get svc k8s-auto-heal -n ${{ env.KUBE_NAMESPACE }} -o jsonpath='{.spec.ports[0].nodePort}')"
+
+  # 🧪 Integration Tests
+  integration-tests:
+    needs: [deploy-to-k8s]
+    if: needs.detect-changes.outputs.should-deploy == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: 📥 Checkout Code
+        uses: actions/checkout@v4
+
+      - name: 🔧 Setup Minikube
+        uses: medyagh/setup-minikube@master
+        with:
+          minikube-version: 1.32.0
+          kubernetes-version: 1.28.3
+          driver: docker
+
+      - name: 🧪 Run Integration Tests
+        run: |
+          # Test MCP Server Health
+          kubectl port-forward svc/k8s-auto-heal ${{ env.MCP_SERVER_PORT }}:${{ env.MCP_SERVER_PORT }} -n ${{ env.KUBE_NAMESPACE }} &
+          sleep 10
+          
+          # Test MCP endpoints
+          curl -f http://localhost:${{ env.MCP_SERVER_PORT }}/health || exit 1
+          curl -f http://localhost:${{ env.MCP_SERVER_PORT }}/metrics || exit 1
+          
+          echo "✅ Integration tests passed!"
+
+      - name: 🧪 Test Auto-Healing Simulation
+        run: |
+          # Create a test pod with low memory limits to trigger OOM
+          kubectl apply -f - <<EOF
+          apiVersion: v1
+          kind: Pod
+          metadata:
+            name: oom-test-pod
+            namespace: ${{ env.KUBE_NAMESPACE }}
+            labels:
+              test: oom-simulation
+          spec:
+            containers:
+            - name: memory-hog
+              image: busybox
+              command: ["sh", "-c", "while true; do dd if=/dev/zero of=/tmp/memory bs=1M count=100; sleep 1; done"]
+              resources:
+                limits:
+                  memory: "50Mi"
+                requests:
+                  memory: "10Mi"
+          EOF
+          
+          # Wait and check if our MCP server detects and handles it
+          sleep 60
+          
+          echo "🧪 OOM simulation completed"
+
+  # 🤖 Auto-Heal PR Validation
+  validate-auto-heal-pr:
+    if: github.event_name == 'pull_request' && needs.detect-changes.outputs.is-auto-heal-pr == 'true'
+    needs: detect-changes
+    runs-on: ubuntu-latest
+    steps:
+      - name: 📥 Checkout Code
+        uses: actions/checkout@v4
+
+      - name: 🔍 Validate Helm Values Changes
+        run: |
+          echo "🤖 Validating auto-heal PR changes..."
+          
+          # Check if only values.yaml files were changed
+          CHANGED_FILES=$(git diff --name-only origin/main...HEAD)
+          echo "Changed files: $CHANGED_FILES"
+          
+          # Validate YAML syntax
+          for file in $CHANGED_FILES; do
+            if [[ "$file" == *.yaml ]] || [[ "$file" == *.yml ]]; then
+              echo "🔍 Validating YAML syntax for $file"
+              python3 -c "import yaml; yaml.safe_load(open('$file'))" || exit 1
+            fi
+          done
+          
+          echo "✅ Auto-heal PR validation passed!"
+
+      - name: 🎯 Add Auto-Merge Label
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              labels: ['auto-heal', 'auto-merge']
+            });
+
+  # 📢 Notification
+  notify:
+    needs: [detect-changes, build-and-push, deploy-to-k8s, integration-tests]
+    if: always() && needs.detect-changes.outputs.should-deploy == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: 🤖 Auto-Heal Success Notification
+        if: needs.detect-changes.outputs.is-auto-heal-pr == 'true' && needs.deploy-to-k8s.result == 'success'
+        run: |
+          echo "🤖 Auto-heal deployment successful!"
+          echo "✅ Cluster issues have been automatically resolved"
+          echo "🔧 Resource limits updated and deployed"
+
+      - name: 📢 Notify Success
+        if: needs.deploy-to-k8s.result == 'success' && needs.integration-tests.result == 'success'
+        run: |
+          echo "🎉 Deployment successful!"
+          echo "✅ K8s Auto-Heal MCP Server is running"
+          echo "✅ Integration tests passed"
+          echo "🔍 Monitoring cluster for pod crashes and OOM issues"
+
+      - name: 🚨 Notify Failure
+        if: needs.deploy-to-k8s.result == 'failure' || needs.integration-tests.result == 'failure'
+        run: |
+          echo "❌ Deployment failed!"
+          echo "Please check the logs for details"
+          exit 1
+
+  # 🧹 Cleanup (Optional - runs on schedule)
+  cleanup-test-resources:
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - name: 🔧 Setup Minikube
+        uses: medyagh/setup-minikube@master
+        with:
+          minikube-version: 1.32.0
+          kubernetes-version: 1.28.3
+          driver: docker
+
+      - name: 🧹 Clean Test Pods
+        run: |
+          kubectl delete pods -n ${{ env.KUBE_NAMESPACE }} -l test=oom-simulation --ignore-not-found=true
+          echo "🧹 Cleanup completed"

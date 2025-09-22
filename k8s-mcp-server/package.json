@@ -1,0 +1,52 @@
+{
+  "name": "k8s-auto-heal-mcp-server",
+  "version": "1.0.0",
+  "description": "🚀 AI-powered Kubernetes cluster auto-healing and optimization MCP server",
+  "main": "k8s-auto-heal-server.js",
+  "type": "module",
+  "bin": {
+    "k8s-auto-heal-server": "k8s-auto-heal-server.js"
+  },
+  "scripts": {
+    "start": "node k8s-auto-heal-server.js",
+    "start:http": "node k8s-http-server.js",
+    "dev": "node --watch k8s-auto-heal-server.js",
+    "test": "node test-k8s-server.js",
+    "health-check": "curl -f http://localhost:8080/health || exit 1"
+  },
+  "keywords": [
+    "kubernetes",
+    "mcp",
+    "auto-healing",
+    "monitoring",
+    "devops",
+    "ai",
+    "prometheus",
+    "helm"
+  ],
+  "author": "AI DevOps Team",
+  "license": "MIT",
+  "dependencies": {
+    "@kubernetes/client-node": "^0.20.0",
+    "@modelcontextprotocol/sdk": "^1.17.5",
+    "@octokit/rest": "^20.0.2",
+    "js-yaml": "^4.1.0",
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "node-fetch": "^3.3.2"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.2"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/your-org/k8s-auto-heal-mcp-server.git"
+  },
+  "bugs": {
+    "url": "https://github.com/your-org/k8s-auto-heal-mcp-server/issues"
+  },
+  "homepage": "https://github.com/your-org/k8s-auto-heal-mcp-server#readme"
+}

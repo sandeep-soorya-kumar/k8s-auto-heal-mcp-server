@@ -1,0 +1,56 @@
+{
+  "MCP Git Status": {
+    "prefix": "mcp-status",
+    "body": [
+      "curl -X POST http://localhost:3000/execute \\",
+      "  -H \"Content-Type: application/json\" \\",
+      "  -d '{\"tool\": \"git-status\", \"arguments\": {}}'"
+    ],
+    "description": "Check Git status via MCP server"
+  },
+  "MCP Git Branch": {
+    "prefix": "mcp-branch",
+    "body": [
+      "curl -X POST http://localhost:3000/execute \\",
+      "  -H \"Content-Type: application/json\" \\",
+      "  -d '{\"tool\": \"git-branch\", \"arguments\": {\"action\": \"list\"}}'"
+    ],
+    "description": "List Git branches via MCP server"
+  },
+  "MCP Git Commit": {
+    "prefix": "mcp-commit",
+    "body": [
+      "curl -X POST http://localhost:3000/execute \\",
+      "  -H \"Content-Type: application/json\" \\",
+      "  -d '{\"tool\": \"git-commit\", \"arguments\": {\"message\": \"$1\", \"addAll\": true}}'"
+    ],
+    "description": "Create Git commit via MCP server"
+  },
+  "MCP Git Push": {
+    "prefix": "mcp-push",
+    "body": [
+      "curl -X POST http://localhost:3000/execute \\",
+      "  -H \"Content-Type: application/json\" \\",
+      "  -d '{\"tool\": \"git-push\", \"arguments\": {}}'"
+    ],
+    "description": "Push to Git via MCP server"
+  },
+  "MCP Create PR": {
+    "prefix": "mcp-pr",
+    "body": [
+      "curl -X POST http://localhost:3000/execute \\",
+      "  -H \"Content-Type: application/json\" \\",
+      "  -d '{\"tool\": \"create-pull-request\", \"arguments\": {\"title\": \"$1\", \"head\": \"$2\", \"base\": \"main\"}}'"
+    ],
+    "description": "Create pull request via MCP server"
+  }
+}
+
+
+
+
+
+
+
+
+

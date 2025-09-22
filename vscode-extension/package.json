@@ -1,0 +1,59 @@
+{
+  "name": "git-cicd-mcp",
+  "displayName": "Git CI/CD MCP",
+  "description": "Git and CI/CD tools via MCP server",
+  "version": "1.0.0",
+  "publisher": "your-publisher",
+  "engines": {
+    "vscode": "^1.74.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onCommand:git-cicd-mcp.status"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "git-cicd-mcp.status",
+        "title": "Git Status",
+        "category": "Git CI/CD"
+      },
+      {
+        "command": "git-cicd-mcp.branch",
+        "title": "Git Branch",
+        "category": "Git CI/CD"
+      },
+      {
+        "command": "git-cicd-mcp.commit",
+        "title": "Git Commit",
+        "category": "Git CI/CD"
+      },
+      {
+        "command": "git-cicd-mcp.push",
+        "title": "Git Push",
+        "category": "Git CI/CD"
+      },
+      {
+        "command": "git-cicd-mcp.pullRequest",
+        "title": "Create Pull Request",
+        "category": "Git CI/CD"
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.74.0",
+    "@types/node": "16.x",
+    "typescript": "^4.9.4"
+  },
+  "dependencies": {
+    "node-fetch": "^3.3.2"
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "name": "basic-mcp-server",
+  "version": "1.0.0",
+  "main": "index.js",
+  "type": "module",
+  "bin": {
+    "basic-mcp-server": "server.js",
+    "git-cicd-mcp-server": "git-cicd-server.js",
+    "jira-mcp-server": "jira-mcp-server.js",
+    "combined-mcp-server": "combined-mcp-server.js"
+  },
+  "scripts": {
+    "test": "node test.js",
+    "start": "node server.js",
+    "start:http": "node simple-http-server.js",
+    "start:git-cicd": "node git-cicd-server.js",
+    "start:jira": "node jira-mcp-server.js",
+    "start:jira-http": "node jira-http-server.js",
+    "start:combined": "node combined-mcp-server.js",
+    "test:jira": "node jira-test.js",
+    "test:tango": "node test-tango-jira.js",
+    "debug:jira": "node debug-jira.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "A simple Model Context Protocol (MCP) server that provides an integer addition tool.",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.17.5",
+    "@octokit/rest": "^20.0.2",
+    "cors": "^2.8.5",
+    "express": "^4.18.2",
+    "node-fetch": "^3.3.2"
+  }
+}
