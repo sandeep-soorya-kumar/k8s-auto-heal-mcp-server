@@ -1,0 +1,11 @@
+{
+  "mcp.servers": {
+    "git-cicd-server": {
+      "command": "node",
+      "args": ["./git-cicd-server.js"],
+      "env": {
+        "GITHUB_TOKEN": "your-github-token-here"
+      }
+    }
+  }
+}
