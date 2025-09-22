@@ -90,6 +90,18 @@ jobs:
           # Set permissions
           chmod 600 ~/.kube/config
           
+          # Set KUBECONFIG environment variable
+          export KUBECONFIG=~/.kube/config
+          echo "KUBECONFIG=$KUBECONFIG" >> $GITHUB_ENV
+          
+          # Debug: Show kubeconfig content (first few lines only)
+          echo "📋 Kubeconfig content (first 10 lines):"
+          head -10 ~/.kube/config
+          
+          # Debug: Show current context
+          echo "📋 Current context:"
+          kubectl config current-context
+          
           # Verify connection
           kubectl cluster-info
           kubectl get nodes
