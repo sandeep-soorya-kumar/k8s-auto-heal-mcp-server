@@ -38,8 +38,8 @@ const CONFIG = {
   
   // 🐙 GitHub Configuration
   GITHUB_TOKEN: process.env.GITHUB_TOKEN,
-  GITHUB_OWNER: process.env.GITHUB_OWNER || 'your-org',
-  GITHUB_REPO: process.env.GITHUB_REPO || 'k8s-manifests',
+  GITHUB_OWNER: process.env.GITHUB_OWNER || 'sandeep-soorya-kumar',
+  GITHUB_REPO: process.env.GITHUB_REPO || 'k8s-auto-heal-mcp-server',
   GITHUB_BRANCH: process.env.GITHUB_BRANCH || 'main',
   GITHUB_BASE_PATH: process.env.GITHUB_BASE_PATH || 'helm/k8s-auto-heal/values.yaml'
 };

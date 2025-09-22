@@ -24,7 +24,7 @@
     "prometheus",
     "helm"
   ],
-  "author": "AI DevOps Team",
+  "author": "Sandeep Soorya Kumar <sandeepsoorya.nair@nbcuni.com>",
   "license": "MIT",
   "dependencies": {
     "@kubernetes/client-node": "^0.20.0",
@@ -43,10 +43,10 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/your-org/k8s-auto-heal-mcp-server.git"
+    "url": "https://github.com/sandeep-soorya-kumar/k8s-auto-heal-mcp-server.git"
   },
   "bugs": {
-    "url": "https://github.com/your-org/k8s-auto-heal-mcp-server/issues"
+    "url": "https://github.com/sandeep-soorya-kumar/k8s-auto-heal-mcp-server/issues"
   },
-  "homepage": "https://github.com/your-org/k8s-auto-heal-mcp-server#readme"
+  "homepage": "https://github.com/sandeep-soorya-kumar/k8s-auto-heal-mcp-server#readme"
 }

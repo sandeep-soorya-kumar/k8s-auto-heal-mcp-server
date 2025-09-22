@@ -11,12 +11,12 @@ keywords:
   - mcp
   - ai
   - devops
-home: https://github.com/your-org/k8s-auto-heal-mcp-server
+home: https://github.com/sandeep-soorya-kumar/k8s-auto-heal-mcp-server
 sources:
-  - https://github.com/your-org/k8s-auto-heal-mcp-server
+  - https://github.com/sandeep-soorya-kumar/k8s-auto-heal-mcp-server
 maintainers:
-  - name: AI DevOps Team
-    email: devops@your-org.com
+  - name: Sandeep Soorya Kumar
+    email: sandeepsoorya.nair@nbcuni.com
 annotations:
   category: Monitoring
   licenses: MIT

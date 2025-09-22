@@ -21,7 +21,7 @@ on:
 env:
   # ECR Configuration
   AWS_REGION: us-east-1
-  ECR_REGISTRY: public.ecr.aws/your-namespace
+  ECR_REGISTRY: public.ecr.aws/sandeep-soorya-kumar
   IMAGE_NAME: k8s-auto-heal-mcp
   
   # Kubernetes Configuration

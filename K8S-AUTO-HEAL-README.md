@@ -403,6 +403,12 @@ npm run dev
 
 MIT License - see [LICENSE](LICENSE) file for details.
 
+## 👨‍💻 Author
+
+**Sandeep Soorya Kumar**
+- Email: sandeepsoorya.nair@nbcuni.com
+- GitHub: [@sandeep-soorya-kumar](https://github.com/sandeep-soorya-kumar)
+
 ## 🙏 Acknowledgments
 
 - **Kubernetes community** for the amazing ecosystem
