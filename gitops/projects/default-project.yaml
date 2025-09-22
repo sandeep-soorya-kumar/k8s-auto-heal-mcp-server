@@ -1,0 +1,44 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: default
+  namespace: argocd
+spec:
+  description: Default project for GitOps applications
+  sourceRepos:
+    - 'https://github.com/sandeep-soorya-kumar/MCP-For-Beginners.git'
+  destinations:
+    - namespace: '*'
+      server: https://kubernetes.default.svc
+  clusterResourceWhitelist:
+    - group: ''
+      kind: Namespace
+    - group: ''
+      kind: Node
+    - group: ''
+      kind: PersistentVolume
+    - group: 'rbac.authorization.k8s.io'
+      kind: ClusterRole
+    - group: 'rbac.authorization.k8s.io'
+      kind: ClusterRoleBinding
+  namespaceResourceWhitelist:
+    - group: ''
+      kind: '*'
+    - group: 'apps'
+      kind: '*'
+    - group: 'extensions'
+      kind: '*'
+    - group: 'networking.k8s.io'
+      kind: '*'
+    - group: 'monitoring.coreos.com'
+      kind: '*'
+    - group: 'argoproj.io'
+      kind: '*'
+  roles:
+    - name: admin
+      description: Admin role for GitOps
+      policies:
+        - p, proj:default:admin, applications, *, default/*, allow
+        - p, proj:default:admin, repositories, *, *, allow
+      groups:
+        - argocd-admins
