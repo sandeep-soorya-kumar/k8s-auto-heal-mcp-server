@@ -1,0 +1,180 @@
+name: 🚀 Deploy to Existing Cluster
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'helm/prometheus/**'
+      - '.github/workflows/deploy-to-existing-cluster.yml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'helm/prometheus/**'
+      - '.github/workflows/deploy-to-existing-cluster.yml'
+  workflow_dispatch:
+    inputs:
+      force_deploy:
+        description: 'Force deployment even if no changes detected'
+        required: false
+        default: 'false'
+        type: boolean
+
+env:
+  HELM_CHART_PATH: './helm/prometheus'
+  NAMESPACE: 'monitoring'
+  RELEASE_NAME: 'prometheus'
+
+jobs:
+  # Job 1: Validate Helm Chart
+  validate:
+    name: 🔍 Validate Helm Chart
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: '3.14.0'
+
+      - name: Lint Helm Chart
+        run: |
+          echo "🔍 Linting Helm chart..."
+          helm lint ${{ env.HELM_CHART_PATH }}
+          echo "✅ Helm chart validation passed!"
+
+      - name: Template Helm Chart
+        run: |
+          echo "📋 Generating Kubernetes manifests..."
+          helm template ${{ env.RELEASE_NAME }} ${{ env.HELM_CHART_PATH }} \
+            --namespace ${{ env.NAMESPACE }} \
+            --output-dir ./generated-manifests
+          echo "✅ Helm template generation successful!"
+
+      - name: Upload generated manifests
+        uses: actions/upload-artifact@v4
+        with:
+          name: helm-manifests
+          path: ./generated-manifests/
+
+  # Job 2: Deploy to Existing Cluster
+  deploy:
+    name: 🚀 Deploy to Existing Cluster
+    runs-on: ubuntu-latest
+    needs: validate
+    if: github.event_name == 'push' || github.event.inputs.force_deploy == 'true'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: '3.14.0'
+
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v4
+        with:
+          version: 'v1.30.0'
+
+      - name: Configure kubectl
+        run: |
+          echo "⚙️ Configuring kubectl for existing cluster..."
+          # Create kubeconfig directory
+          mkdir -p ~/.kube
+          
+          # Write kubeconfig from secret
+          echo "${{ secrets.KUBECONFIG }}" | base64 -d > ~/.kube/config
+          
+          # Set permissions
+          chmod 600 ~/.kube/config
+          
+          # Verify connection
+          kubectl cluster-info
+          kubectl get nodes
+          kubectl get namespaces
+
+      - name: Create namespace
+        run: |
+          echo "📁 Creating namespace if it doesn't exist..."
+          kubectl create namespace ${{ env.NAMESPACE }} --dry-run=client -o yaml | kubectl apply -f -
+          echo "✅ Namespace ${{ env.NAMESPACE }} created/verified"
+          kubectl get namespaces
+
+      - name: Deploy Prometheus
+        run: |
+          echo "🚀 Deploying Prometheus Helm chart to existing cluster..."
+          echo "📋 Namespace: ${{ env.NAMESPACE }}"
+          echo "📋 Release: ${{ env.RELEASE_NAME }}"
+          echo "📋 Chart: ${{ env.HELM_CHART_PATH }}"
+          
+          # Ensure namespace exists
+          kubectl create namespace ${{ env.NAMESPACE }} --dry-run=client -o yaml | kubectl apply -f -
+          
+          # Deploy with explicit namespace creation
+          helm upgrade --install ${{ env.RELEASE_NAME }} ${{ env.HELM_CHART_PATH }} \
+            --namespace ${{ env.NAMESPACE }} \
+            --create-namespace \
+            --wait \
+            --timeout=10m \
+            --atomic
+          echo "✅ Prometheus deployment completed!"
+
+      - name: Verify deployment
+        run: |
+          echo "🔍 Verifying deployment..."
+          kubectl get pods -n ${{ env.NAMESPACE }}
+          kubectl get services -n ${{ env.NAMESPACE }}
+          kubectl get deployments -n ${{ env.NAMESPACE }}
+          
+          echo "📊 Checking pod status..."
+          kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=prometheus -n ${{ env.NAMESPACE }} --timeout=300s
+          echo "✅ All pods are ready!"
+
+      - name: Get service URLs
+        run: |
+          echo "🌐 Service information:"
+          kubectl get services -n ${{ env.NAMESPACE }}
+          echo ""
+          echo "🔗 To access Prometheus locally, run:"
+          echo "kubectl port-forward svc/prometheus-server -n ${{ env.NAMESPACE }} 9090:9090"
+          echo ""
+          echo "🔗 To access AlertManager locally, run:"
+          echo "kubectl port-forward svc/prometheus-alertmanager -n ${{ env.NAMESPACE }} 9093:9093"
+
+      - name: Run health checks
+        run: |
+          echo "🏥 Running health checks..."
+          # Check if Prometheus is responding
+          POD_NAME=$(kubectl get pods -n ${{ env.NAMESPACE }} -l app.kubernetes.io/name=prometheus -o jsonpath='{.items[0].metadata.name}')
+          if [ -n "$POD_NAME" ]; then
+            echo "✅ Prometheus pod found: $POD_NAME"
+            kubectl exec -n ${{ env.NAMESPACE }} $POD_NAME -- wget -qO- http://localhost:9090/-/healthy
+            echo "✅ Prometheus health check passed!"
+          else
+            echo "❌ Prometheus pod not found!"
+            exit 1
+          fi
+
+  # Job 3: Notification
+  notify:
+    name: 📢 Notify
+    runs-on: ubuntu-latest
+    needs: [validate, deploy]
+    if: always()
+    steps:
+      - name: Deployment Status
+        run: |
+          if [ "${{ needs.deploy.result }}" == "success" ]; then
+            echo "🎉 Deployment successful!"
+            echo "✅ Prometheus is now running in the monitoring namespace"
+            echo "🔗 Access Prometheus: kubectl port-forward svc/prometheus-server -n monitoring 9090:9090"
+            echo "🔗 Access AlertManager: kubectl port-forward svc/prometheus-alertmanager -n monitoring 9093:9093"
+          elif [ "${{ needs.validate.result }}" == "failure" ]; then
+            echo "❌ Validation failed!"
+            echo "🔍 Check the validate job logs for details"
+          else
+            echo "❌ Deployment failed!"
+            echo "🔍 Check the deploy job logs for details"
+          fi
