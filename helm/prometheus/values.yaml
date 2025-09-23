@@ -876,6 +876,19 @@ serverFiles:
               summary: "Pod {{ $labels.pod }} in namespace {{ $labels.namespace }} is restarting frequently"
               description: "Pod {{ $labels.pod }} in namespace {{ $labels.namespace }} is restarting {{ $value | humanize }} times per second. This may indicate application issues or resource constraints."
               runbook_url: "https://kubernetes.io/docs/tasks/debug-application-cluster/debug-application/"
+
+          # Test Alert - Easy to Trigger
+          - alert: TestAlert
+            expr: kube_pod_info{namespace="oom-test"} == 1
+            for: 0m
+            labels:
+              severity: warning
+              category: test
+              service: kubernetes
+            annotations:
+              summary: "🧪 TEST ALERT: Pod exists in oom-test namespace"
+              description: "This is a test alert triggered by the presence of a pod in the oom-test namespace. Pod: {{ $labels.pod }}"
+              runbook_url: "https://kubernetes.io/docs/tasks/debug-application-cluster/debug-application/"
   ## DEPRECATED DEFAULT VALUE, unless explicitly naming your files, please use alerting_rules.yml
   alerts: {}
 
@@ -1398,12 +1411,12 @@ alertmanager:
     receivers:
     - name: 'web.hook'
       webhook_configs:
-      - url: 'http://localhost:5001/webhook'
+      - url: 'http://localhost:5002/webhook'
         send_resolved: true
 
     - name: 'critical-alerts'
       webhook_configs:
-      - url: 'http://localhost:5001/critical'
+      - url: 'http://localhost:5002/critical'
         send_resolved: true
       # Email alerts for critical issues
       email_configs:
@@ -1425,7 +1438,7 @@ alertmanager:
 
     - name: 'warning-alerts'
       webhook_configs:
-      - url: 'http://localhost:5001/warning'
+      - url: 'http://localhost:5002/warning'
         send_resolved: true
       # Email alerts for warning issues
       email_configs:
