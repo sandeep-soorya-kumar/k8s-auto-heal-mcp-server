@@ -1,0 +1,52 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: traefik-ingress
+  namespace: argocd
+  labels:
+    app.kubernetes.io/name: traefik-ingress
+    app.kubernetes.io/part-of: argocd
+spec:
+  project: default
+  
+  # Source configuration - Traefik from your GitHub repository
+  source:
+    repoURL: https://github.com/sandeep-soorya-kumar/k8s-auto-heal-mcp-server.git
+    targetRevision: HEAD
+    path: helm/traefik  # Path to your Traefik Helm chart
+    helm:
+      valueFiles:
+        - values.yaml
+  
+  # Destination configuration - where to deploy
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: traefik-system
+  
+  # Sync policy configuration
+  syncPolicy:
+    automated:
+      prune: true      # Remove resources that are no longer defined
+      selfHeal: true   # Automatically sync when drift is detected
+      allowEmpty: false
+    syncOptions:
+      - CreateNamespace=true  # Create namespace if it doesn't exist
+      - PrunePropagationPolicy=foreground
+      - PruneLast=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
+  
+  # Ignore differences in certain fields
+  ignoreDifferences:
+    - group: apps
+      kind: Deployment
+      jsonPointers:
+        - /spec/replicas
+    - group: ""
+      kind: Secret
+      jsonPointers:
+        - /data
