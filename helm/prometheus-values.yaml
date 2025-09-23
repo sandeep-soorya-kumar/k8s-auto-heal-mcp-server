@@ -7,138 +7,27 @@ global:
   evaluation_interval: 15s
 
 # Prometheus server configuration
-prometheus:
-  prometheusSpec:
-    retention: 15d
-    storageSpec:
-      volumeClaimTemplate:
-        spec:
-          storageClassName: standard
-          accessModes: ["ReadWriteOnce"]
-          resources:
-            requests:
-              storage: 10Gi
-    
-    # Resource limits
-    resources:
-      limits:
-        cpu: 2000m
-        memory: 4Gi
-      requests:
-        cpu: 100m
-        memory: 512Mi
-    
-    # Additional scrape configs for K8s Auto-Heal
-    additionalScrapeConfigs:
-      - job_name: 'k8s-auto-heal'
-        kubernetes_sd_configs:
-          - role: pod
-            namespaces:
-              names:
-                - helm
-        relabel_configs:
-          - source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_name]
-            action: keep
-            regex: k8s-auto-heal
-          - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
-            action: keep
-            regex: true
-          - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
-            action: replace
-            target_label: __metrics_path__
-            regex: (.+)
-          - source_labels: [__address__, __meta_kubernetes_pod_annotation_prometheus_io_port]
-            action: replace
-            regex: ([^:]+)(?::\d+)?;(\d+)
-            replacement: $1:$2
-            target_label: __address__
-
-# Grafana configuration
-grafana:
-  enabled: true
-  adminPassword: admin
-  
-  # Grafana resources
+server:
+  # Resource limits
   resources:
     limits:
-      cpu: 1000m
-      memory: 1Gi
+      cpu: 2000m
+      memory: 4Gi
     requests:
       cpu: 100m
-      memory: 128Mi
+      memory: 512Mi
   
-  # Enable persistence
-  persistence:
+  # Data retention
+  retention: 15d
+  
+  # Persistent volume
+  persistentVolume:
     enabled: true
-    size: 1Gi
-  
-  # Dashboards
-  dashboardProviders:
-    dashboardproviders.yaml:
-      apiVersion: 1
-      providers:
-      - name: 'k8s-auto-heal'
-        orgId: 1
-        folder: 'K8s Auto-Heal'
-        type: file
-        disableDeletion: false
-        editable: true
-        options:
-          path: /var/lib/grafana/dashboards/k8s-auto-heal
-  
-  dashboards:
-    k8s-auto-heal:
-      k8s-cluster-health:
-        gnetId: 7249
-        revision: 1
-        datasource: Prometheus
-      k8s-pod-monitoring:
-        gnetId: 6417
-        revision: 1
-        datasource: Prometheus
+    size: 10Gi
+    storageClass: standard
 
 # AlertManager configuration
 alertmanager:
-  enabled: true
-  
-  alertmanagerSpec:
-    resources:
-      limits:
-        cpu: 500m
-        memory: 512Mi
-      requests:
-        cpu: 50m
-        memory: 64Mi
-    
-    # Alert routing
-    config:
-      global:
-        smtp_smarthost: 'localhost:587'
-        smtp_from: 'k8s-alerts@your-domain.com'
-      
-      route:
-        group_by: ['alertname']
-        group_wait: 10s
-        group_interval: 10s
-        repeat_interval: 1h
-        receiver: 'web.hook'
-      
-      receivers:
-        - name: 'web.hook'
-          webhook_configs:
-            - url: 'http://k8s-auto-heal:3000/webhook/alerts'
-              send_resolved: true
-
-# Node Exporter
-nodeExporter:
-  enabled: true
-  
-# Kube State Metrics
-kubeStateMetrics:
-  enabled: true
-
-# Prometheus Operator
-prometheusOperator:
   enabled: true
   
   # Resource limits
@@ -147,12 +36,170 @@ prometheusOperator:
       cpu: 500m
       memory: 512Mi
     requests:
-      cpu: 100m
-      memory: 128Mi
+      cpu: 50m
+      memory: 64Mi
+  
+  # AlertManager configuration
+  config:
+    global:
+      smtp_smarthost: 'smtp.gmail.com:587'
+      smtp_from: 'sandeep.opensearch@gmail.com'
+      smtp_auth_username: 'sandeep.opensearch@gmail.com'
+      smtp_auth_password: 'your-app-password'
+      smtp_require_tls: true
 
-# Additional monitoring rules
-additionalPrometheusRules:
-  - name: k8s-auto-heal-rules
+    # Alert routing configuration
+    route:
+      group_by: ['alertname', 'cluster', 'service']
+      group_wait: 10s
+      group_interval: 10s
+      repeat_interval: 1h
+      receiver: 'web.hook'
+      routes:
+      - match:
+          severity: critical
+        receiver: 'critical-alerts'
+        group_wait: 5s
+        repeat_interval: 30m
+      - match:
+          severity: warning
+        receiver: 'warning-alerts'
+        group_wait: 30s
+        repeat_interval: 2h
+
+    # Alert receivers
+    receivers:
+    - name: 'web.hook'
+      webhook_configs:
+      - url: 'http://localhost:5002/webhook'
+        send_resolved: true
+
+    - name: 'critical-alerts'
+      email_configs:
+      - to: 'sandeep.opensearch@gmail.com'
+        subject: '🚨 CRITICAL: {{ .GroupLabels.alertname }}'
+        body: |
+          {{ range .Alerts }}
+          Alert: {{ .Annotations.summary }}
+          Description: {{ .Annotations.description }}
+
+          Labels:
+          {{ range .Labels.SortedPairs }}
+            {{ .Name }}: {{ .Value }}
+          {{ end }}
+
+          Runbook: {{ .Annotations.runbook_url }}
+          Dashboard: {{ .Annotations.dashboard_url }}
+          {{ end }}
+      webhook_configs:
+      - url: 'http://localhost:5002/critical'
+        send_resolved: true
+      - url: 'http://localhost:5003/webhook'
+        send_resolved: true
+
+    - name: 'warning-alerts'
+      email_configs:
+      - to: 'sandeep.opensearch@gmail.com'
+        subject: '⚠️ WARNING: {{ .GroupLabels.alertname }}'
+        body: |
+          {{ range .Alerts }}
+          Alert: {{ .Annotations.summary }}
+          Description: {{ .Annotations.description }}
+
+          Labels:
+          {{ range .Labels.SortedPairs }}
+            {{ .Name }}: {{ .Value }}
+          {{ end }}
+
+          Runbook: {{ .Annotations.runbook_url }}
+          Dashboard: {{ .Annotations.dashboard_url }}
+          {{ end }}
+      webhook_configs:
+      - url: 'http://localhost:5002/warning'
+        send_resolved: true
+      - url: 'http://localhost:5003/webhook'
+        send_resolved: true
+
+    # Inhibit rules to prevent spam
+    inhibit_rules:
+    - source_match:
+        severity: 'critical'
+      target_match:
+        severity: 'warning'
+      equal: ['alertname', 'cluster', 'service']
+
+  # Persistent volume for AlertManager
+  persistence:
+    enabled: true
+    size: 2Gi
+
+# Node Exporter
+prometheus-node-exporter:
+  enabled: true
+  
+  # Resource limits
+  resources:
+    limits:
+      cpu: 50m
+      memory: 32Mi
+    requests:
+      cpu: 25m
+      memory: 16Mi
+
+# Kube State Metrics
+kube-state-metrics:
+  enabled: true
+  
+  # Resource limits
+  resources:
+    limits:
+      cpu: 100m
+      memory: 64Mi
+    requests:
+      cpu: 50m
+      memory: 32Mi
+
+# Pushgateway
+prometheus-pushgateway:
+  enabled: true
+  
+  # Resource limits
+  resources:
+    limits:
+      cpu: 50m
+      memory: 32Mi
+    requests:
+      cpu: 25m
+      memory: 16Mi
+
+# Additional scrape configs for K8s Auto-Heal
+extraScrapeConfigs: |
+  - job_name: 'k8s-auto-heal'
+    kubernetes_sd_configs:
+      - role: pod
+        namespaces:
+          names:
+            - helm
+    relabel_configs:
+      - source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_name]
+        action: keep
+        regex: k8s-auto-heal
+      - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+        action: keep
+        regex: true
+      - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
+        action: replace
+        target_label: __metrics_path__
+        regex: (.+)
+      - source_labels: [__address__, __meta_kubernetes_pod_annotation_prometheus_io_port]
+        action: replace
+        regex: ([^:]+)(?::\d+)?;(\d+)
+        replacement: $1:$2
+        target_label: __address__
+
+# Additional alert rules
+ruleFiles:
+  k8s-auto-heal-rules.yml: |
     groups:
       - name: k8s.auto-heal
         rules:

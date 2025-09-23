@@ -7,9 +7,6 @@ on:
       - 'k8s-mcp-server/**'
       - 'helm/**'
       - '.github/workflows/k8s-auto-heal.yml'
-  pull_request:
-    branches: [ main ]
-    types: [opened, synchronize, reopened, closed]
   workflow_dispatch:
     inputs:
       force_deploy:

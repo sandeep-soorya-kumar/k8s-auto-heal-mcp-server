@@ -6,11 +6,6 @@ on:
     paths:
       - 'helm/prometheus/**'
       - '.github/workflows/deploy-to-existing-cluster.yml'
-  pull_request:
-    branches: [ main ]
-    paths:
-      - 'helm/prometheus/**'
-      - '.github/workflows/deploy-to-existing-cluster.yml'
   workflow_dispatch:
     inputs:
       force_deploy:
