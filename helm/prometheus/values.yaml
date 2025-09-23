@@ -1368,11 +1368,12 @@ alertmanager:
   ## AlertManager configuration
   config:
     global:
-      # SMTP configuration (uncomment and configure for email alerts)
-      # smtp_smarthost: 'localhost:587'
-      # smtp_from: 'alerts@yourcompany.com'
-      # smtp_auth_username: 'alerts@yourcompany.com'
-      # smtp_auth_password: 'password'
+      # SMTP configuration for Gmail
+      smtp_smarthost: 'smtp.gmail.com:587'
+      smtp_from: 'sandeep.opensearch@gmail.com'
+      smtp_auth_username: 'sandeep.opensearch@gmail.com'
+      smtp_auth_password: 'your-app-password'  # Use Gmail App Password
+      smtp_require_tls: true
 
     # Alert routing configuration
     route:
@@ -1404,29 +1405,45 @@ alertmanager:
       webhook_configs:
       - url: 'http://localhost:5001/critical'
         send_resolved: true
-      # Uncomment for email alerts
-      # email_configs:
-      # - to: 'oncall@yourcompany.com'
-      #   subject: '🚨 CRITICAL: {{ .GroupLabels.alertname }}'
-      #   body: |
-      #     {{ range .Alerts }}
-      #     Alert: {{ .Annotations.summary }}
-      #     Description: {{ .Annotations.description }}
-      #     {{ end }}
+      # Email alerts for critical issues
+      email_configs:
+      - to: 'sandeep.opensearch@gmail.com'
+        subject: '🚨 CRITICAL: {{ .GroupLabels.alertname }}'
+        body: |
+          {{ range .Alerts }}
+          Alert: {{ .Annotations.summary }}
+          Description: {{ .Annotations.description }}
+          
+          Labels:
+          {{ range .Labels.SortedPairs }}
+            {{ .Name }}: {{ .Value }}
+          {{ end }}
+          
+          Runbook: {{ .Annotations.runbook_url }}
+          Dashboard: {{ .Annotations.dashboard_url }}
+          {{ end }}
 
     - name: 'warning-alerts'
       webhook_configs:
       - url: 'http://localhost:5001/warning'
         send_resolved: true
-      # Uncomment for email alerts
-      # email_configs:
-      # - to: 'team@yourcompany.com'
-      #   subject: '⚠️ WARNING: {{ .GroupLabels.alertname }}'
-      #   body: |
-      #     {{ range .Alerts }}
-      #     Alert: {{ .Annotations.summary }}
-      #     Description: {{ .Annotations.description }}
-      #     {{ end }}
+      # Email alerts for warning issues
+      email_configs:
+      - to: 'sandeep.opensearch@gmail.com'
+        subject: '⚠️ WARNING: {{ .GroupLabels.alertname }}'
+        body: |
+          {{ range .Alerts }}
+          Alert: {{ .Annotations.summary }}
+          Description: {{ .Annotations.description }}
+          
+          Labels:
+          {{ range .Labels.SortedPairs }}
+            {{ .Name }}: {{ .Value }}
+          {{ end }}
+          
+          Runbook: {{ .Annotations.runbook_url }}
+          Dashboard: {{ .Annotations.dashboard_url }}
+          {{ end }}
 
     # Inhibit rules to prevent spam
     inhibit_rules:
