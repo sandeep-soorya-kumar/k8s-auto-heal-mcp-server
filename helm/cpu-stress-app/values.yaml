@@ -22,6 +22,7 @@ resources:
   requests:
     cpu: 1620m
     memory: 256Mi
+
 autoscaling:
   enabled: false
 nodeSelector: {}
