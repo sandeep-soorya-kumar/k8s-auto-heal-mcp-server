@@ -878,17 +878,51 @@ serverFiles:
               runbook_url: "https://kubernetes.io/docs/tasks/debug-application-cluster/debug-application/"
 
           # Test Alert - Easy to Trigger
-          - alert: TestAlert
-            expr: kube_pod_info{namespace="oom-test"} == 1
-            for: 0m
-            labels:
-              severity: warning
-              category: test
-              service: kubernetes
-            annotations:
-              summary: "🧪 TEST ALERT: Pod exists in oom-test namespace"
-              description: "This is a test alert triggered by the presence of a pod in the oom-test namespace. Pod: {{ $labels.pod }}"
-              runbook_url: "https://kubernetes.io/docs/tasks/debug-application-cluster/debug-application/"
+                 - alert: PodCPUThrottling
+                   expr: rate(container_cpu_cfs_throttled_seconds_total[5m]) > 0.1
+                   for: 2m
+                   labels:
+                     severity: warning
+                     category: cpu
+                     service: kubernetes
+                   annotations:
+                     summary: "Pod {{ $labels.pod }} is experiencing CPU throttling"
+                     description: "Pod {{ $labels.pod }} in namespace {{ $labels.namespace }} is being CPU throttled. Current throttling rate: {{ $value }}. This indicates the pod is hitting its CPU limits."
+                     runbook_url: "https://kubernetes.io/docs/tasks/configure-pod-container/assign-cpu-resource/"
+                     dashboard_url: "http://localhost:9090/graph?g0.expr=rate(container_cpu_cfs_throttled_seconds_total%5B5m%5D)%20%3E%200.1&g0.tab=1"
+                 - alert: PodHighCPUUsage
+                   expr: (rate(container_cpu_usage_seconds_total[5m]) * 100) > 80
+                   for: 3m
+                   labels:
+                     severity: warning
+                     category: cpu
+                     service: kubernetes
+                   annotations:
+                     summary: "Pod {{ $labels.pod }} has high CPU usage"
+                     description: "Pod {{ $labels.pod }} in namespace {{ $labels.namespace }} is using {{ $value }}% CPU, which is above 80% threshold."
+                     runbook_url: "https://kubernetes.io/docs/tasks/configure-pod-container/assign-cpu-resource/"
+                 - alert: PodCrashLoopBackOff
+                   expr: kube_pod_status_phase{phase="Running"} == 0 and kube_pod_status_phase{phase="Pending"} == 0 and kube_pod_status_phase{phase="Succeeded"} == 0 and kube_pod_status_phase{phase="Failed"} == 0
+                   for: 1m
+                   labels:
+                     severity: critical
+                     category: pod-health
+                     service: kubernetes
+                   annotations:
+                     summary: "Pod {{ $labels.pod }} is in CrashLoopBackOff"
+                     description: "Pod {{ $labels.pod }} in namespace {{ $labels.namespace }} is in CrashLoopBackOff state, indicating it keeps crashing and restarting."
+                     runbook_url: "https://kubernetes.io/docs/tasks/debug-application-cluster/debug-application/"
+                 - alert: TestAlert
+                   expr: kube_pod_info{namespace="oom-test"} == 1
+                   for: 0m
+                   labels:
+                     severity: warning
+                     category: test
+                     service: kubernetes
+                   annotations:
+                     summary: "🧪 TEST ALERT: Pod exists in oom-test namespace"
+                     description: "This is a test alert triggered by the presence of a pod in the oom-test namespace. Pod: {{ $labels.pod }}"
+                     runbook_url: "https://kubernetes.io/docs/tasks/debug-application-cluster/debug-application/"
   ## DEPRECATED DEFAULT VALUE, unless explicitly naming your files, please use alerting_rules.yml
   alerts: {}
 
