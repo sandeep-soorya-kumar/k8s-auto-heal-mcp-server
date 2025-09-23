@@ -17,12 +17,11 @@ service:
   port: 80
 resources:
   limits:
-    cpu: 200m
+    cpu: 600m
     memory: 256Mi
   requests:
-    cpu: 100m
+    cpu: 180m
     memory: 128Mi
-
 autoscaling:
   enabled: false
 nodeSelector: {}
@@ -32,4 +31,3 @@ cpuStress:
   enabled: true
   intensity: 100
   duration: 60
-  # Force ArgoCD cache refresh
