@@ -1,0 +1,47 @@
+replicaCount: 1
+
+image:
+  repository: busybox
+  pullPolicy: IfNotPresent
+  tag: "latest"
+
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+podAnnotations: {}
+
+podSecurityContext: {}
+
+securityContext: {}
+
+service:
+  type: ClusterIP
+  port: 80
+
+resources:
+  limits:
+    cpu: 50m      # Very low CPU limit to trigger crashes
+    memory: 128Mi
+  requests:
+    cpu: 25m
+    memory: 64Mi
+
+autoscaling:
+  enabled: false
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}
+
+# CPU stress configuration
+cpuStress:
+  enabled: true
+  intensity: 100  # 100% CPU usage
+  duration: 60    # Run for 60 seconds then restart
