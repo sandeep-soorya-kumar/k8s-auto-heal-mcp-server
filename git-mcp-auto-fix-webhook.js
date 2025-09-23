@@ -385,7 +385,7 @@ class GitMCPAutoFixWebhook {
       await execAsync(`git push -u origin ${branchName}`);
       operations.push('git push');
       
-      // Create Pull Request using GitHub CLI
+      // Create Pull Request using GitHub CLI (if authenticated) or provide instructions
       const prTitle = `🔧 Auto-fix: ${commitMessage}`;
       const prBody = `## 🤖 Automated Fix Applied
 
@@ -407,10 +407,24 @@ This PR was automatically created by the GitOps auto-fix system in response to a
 ---
 *This PR was generated automatically by the GitOps auto-fix system.*`;
 
-      console.log(`  🔀 Creating Pull Request...`);
-      const { stdout: prResult } = await execAsync(`gh pr create --title "${prTitle}" --body "${prBody}" --head ${branchName} --base main`);
-      const prUrl = prResult.trim();
-      operations.push('gh pr create');
+      let prUrl = '';
+      try {
+        console.log(`  🔀 Creating Pull Request...`);
+        const { stdout: prResult } = await execAsync(`gh pr create --title "${prTitle}" --body "${prBody}" --head ${branchName} --base main`);
+        prUrl = prResult.trim();
+        operations.push('gh pr create');
+        console.log(`  ✅ PR created: ${prUrl}`);
+      } catch (prError) {
+        console.log(`  ⚠️  Could not create PR automatically: ${prError.message}`);
+        console.log(`  📋 Manual PR creation required:`);
+        console.log(`    1. Go to: https://github.com/sandeep-soorya-kumar/k8s-auto-heal-mcp-server/compare/${branchName}`);
+        console.log(`    2. Title: ${prTitle}`);
+        console.log(`    3. Description: ${prBody}`);
+        console.log(`    4. Create PR and merge when ready`);
+        
+        prUrl = `https://github.com/sandeep-soorya-kumar/k8s-auto-heal-mcp-server/compare/${branchName}`;
+        operations.push('manual_pr_required');
+      }
       
       // Switch back to main branch
       console.log(`  🔄 git checkout main`);
@@ -420,7 +434,11 @@ This PR was automatically created by the GitOps auto-fix system in response to a
       console.log(`✅ Git MCP operations completed successfully:`);
       console.log(`  - Branch: ${branchName}`);
       console.log(`  - Commit: ${commitHash}`);
-      console.log(`  - PR: ${prUrl}`);
+      if (prUrl.includes('compare/')) {
+        console.log(`  - PR Link: ${prUrl} (Manual creation required)`);
+      } else {
+        console.log(`  - PR: ${prUrl}`);
+      }
       
       return {
         success: true,
