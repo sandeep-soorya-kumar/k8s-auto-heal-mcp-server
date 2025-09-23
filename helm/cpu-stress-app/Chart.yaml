@@ -1,0 +1,17 @@
+apiVersion: v2
+name: cpu-stress-app
+description: A Helm chart for CPU stress testing application
+type: application
+version: 0.1.0
+appVersion: "1.0"
+keywords:
+  - cpu
+  - stress
+  - testing
+  - monitoring
+home: https://github.com/sandeep-soorya-kumar/k8s-auto-heal-mcp-server
+sources:
+  - https://github.com/sandeep-soorya-kumar/k8s-auto-heal-mcp-server
+maintainers:
+  - name: K8s Auto-Heal Team
+    email: support@example.com
