@@ -699,11 +699,11 @@ server:
   ##
   resources:
     limits:
-      cpu: 1500m
-      memory: 1.5Gi
+      cpu: 1000m
+      memory: 1Gi
     requests:
-      cpu: 300m
-      memory: 512Mi
+      cpu: 200m
+      memory: 256Mi
   # Updated via GitHub Actions GitOps workflow
 
   # Required for use in managed kubernetes clusters (such as AWS EKS) with custom CNI (such as calico),
