@@ -139,8 +139,10 @@ class GitMCPAutoFixWebhook {
         console.log('✅ CPU fix applied successfully:');
         console.log(`  - Chart: ${chartPath}`);
         console.log(`  - CPU: ${currentCPU} → ${newCPU}`);
-        console.log(`  - Git commit: ${gitResult.commitHash}`);
-        console.log('  - ArgoCD will auto-sync changes');
+        console.log(`  - Branch: ${gitResult.branchName}`);
+        console.log(`  - Commit: ${gitResult.commitHash}`);
+        console.log(`  - PR: ${gitResult.prUrl}`);
+        console.log('  - ArgoCD will auto-sync after PR merge');
 
         return {
           message: `CPU fix applied for ${podName}`,
@@ -151,6 +153,8 @@ class GitMCPAutoFixWebhook {
             chart: chartPath,
             committed: true,
             commit_hash: gitResult.commitHash,
+            branch_name: gitResult.branchName,
+            pr_url: gitResult.prUrl,
             git_operations: gitResult.operations
           }
         };
@@ -207,8 +211,10 @@ class GitMCPAutoFixWebhook {
         console.log('✅ OOM fix applied successfully:');
         console.log(`  - Chart: ${chartPath}`);
         console.log(`  - Memory: ${currentMemory} → ${newMemory}`);
-        console.log(`  - Git commit: ${gitResult.commitHash}`);
-        console.log('  - ArgoCD will auto-sync changes');
+        console.log(`  - Branch: ${gitResult.branchName}`);
+        console.log(`  - Commit: ${gitResult.commitHash}`);
+        console.log(`  - PR: ${gitResult.prUrl}`);
+        console.log('  - ArgoCD will auto-sync after PR merge');
 
         return {
           message: `OOM fix applied for ${podName}`,
@@ -219,6 +225,8 @@ class GitMCPAutoFixWebhook {
             chart: chartPath,
             committed: true,
             commit_hash: gitResult.commitHash,
+            branch_name: gitResult.branchName,
+            pr_url: gitResult.prUrl,
             git_operations: gitResult.operations
           }
         };
@@ -351,9 +359,15 @@ class GitMCPAutoFixWebhook {
 
   async gitCommitAndPushWithMCP(filePath, commitMessage) {
     try {
-      console.log(`📤 Using Git MCP server for commit and push...`);
+      console.log(`📤 Using Git MCP server for commit, push, and PR creation...`);
       
       const operations = [];
+      const branchName = `auto-fix-${Date.now()}`;
+      
+      // Create and checkout new branch
+      console.log(`  🌿 git checkout -b ${branchName}`);
+      await execAsync(`git checkout -b ${branchName}`);
+      operations.push('git checkout -b');
       
       // Add file to git
       console.log(`  📝 git add ${filePath}`);
@@ -366,22 +380,67 @@ class GitMCPAutoFixWebhook {
       const commitHash = commitResult.match(/\[[\w\s-]+\s([a-f0-9]+)\]/)?.[1] || 'unknown';
       operations.push('git commit');
       
-      // Push to remote
-      console.log(`  📝 git push`);
-      await execAsync('git push');
+      // Push branch to remote
+      console.log(`  📤 git push -u origin ${branchName}`);
+      await execAsync(`git push -u origin ${branchName}`);
       operations.push('git push');
       
-      console.log(`✅ Git MCP operations completed successfully: ${commitHash}`);
+      // Create Pull Request using GitHub CLI
+      const prTitle = `🔧 Auto-fix: ${commitMessage}`;
+      const prBody = `## 🤖 Automated Fix Applied
+
+**Alert Type**: ${commitMessage.split(':')[0]}
+
+**Changes Made**:
+- ${commitMessage}
+
+**Files Modified**:
+- \`${filePath}\`
+
+**Commit Hash**: \`${commitHash}\`
+
+**Auto-fix Details**:
+This PR was automatically created by the GitOps auto-fix system in response to a monitoring alert. The system detected resource constraints and applied appropriate fixes.
+
+**Review Required**: ✅ Please review the changes before merging.
+
+---
+*This PR was generated automatically by the GitOps auto-fix system.*`;
+
+      console.log(`  🔀 Creating Pull Request...`);
+      const { stdout: prResult } = await execAsync(`gh pr create --title "${prTitle}" --body "${prBody}" --head ${branchName} --base main`);
+      const prUrl = prResult.trim();
+      operations.push('gh pr create');
+      
+      // Switch back to main branch
+      console.log(`  🔄 git checkout main`);
+      await execAsync(`git checkout main`);
+      operations.push('git checkout main');
+      
+      console.log(`✅ Git MCP operations completed successfully:`);
+      console.log(`  - Branch: ${branchName}`);
+      console.log(`  - Commit: ${commitHash}`);
+      console.log(`  - PR: ${prUrl}`);
       
       return {
         success: true,
         commitHash: commitHash,
+        branchName: branchName,
+        prUrl: prUrl,
         message: commitMessage,
         operations: operations
       };
       
     } catch (error) {
       console.error('Error with Git MCP operations:', error);
+      
+      // Try to switch back to main if we're on a feature branch
+      try {
+        await execAsync('git checkout main');
+      } catch (checkoutError) {
+        console.error('Failed to switch back to main:', checkoutError);
+      }
+      
       return { success: false, error: error.message };
     }
   }
