@@ -1,0 +1,198 @@
+name: 🚀 Auto-Deploy New Helm Charts
+
+on:
+  push:
+    paths:
+      - 'helm/**'
+    branches:
+      - main
+  workflow_dispatch: # Keep manual trigger for testing
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: 📥 Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: 🔧 Setup kubectl
+      uses: azure/setup-kubectl@v3
+      with:
+        version: 'v1.28.0'
+        
+    - name: 🔐 Configure kubectl for Colima
+      run: |
+        # Configure kubectl to use Colima cluster
+        mkdir -p ~/.kube
+        echo "${{ secrets.KUBE_CONFIG }}" | base64 -d > ~/.kube/config
+        chmod 600 ~/.kube/config
+        
+    - name: 🔍 Detect Changed Helm Charts
+      id: detect-charts
+      run: |
+        # Get list of changed files in helm/ directory
+        if [ "${{ github.event_name }}" = "push" ]; then
+          # For push events, get changed files
+          CHANGED_FILES=$(git diff --name-only ${{ github.event.before }} ${{ github.event.after }} | grep '^helm/' | grep -E 'Chart\.yaml$|values\.yaml$' | sed 's|helm/\([^/]*\)/.*|\1|' | sort -u)
+        else
+          # For manual dispatch, check all helm charts
+          CHANGED_FILES=$(find helm/ -name "Chart.yaml" -exec dirname {} \; | sed 's|helm/||' | sort -u)
+        fi
+        
+        if [ -z "$CHANGED_FILES" ]; then
+          echo "No Helm charts detected for deployment"
+          echo "charts=[]" >> $GITHUB_OUTPUT
+          exit 0
+        fi
+        
+        echo "Detected Helm charts: $CHANGED_FILES"
+        echo "charts<<EOF" >> $GITHUB_OUTPUT
+        echo "$CHANGED_FILES" >> $GITHUB_OUTPUT
+        echo "EOF" >> $GITHUB_OUTPUT
+        
+    - name: 📋 Generate ArgoCD Applications
+      if: steps.detect-charts.outputs.charts != '[]'
+      run: |
+        # Read the charts from previous step
+        CHARTS="${{ steps.detect-charts.outputs.charts }}"
+        
+        for CHART in $CHARTS; do
+          echo "🚀 Processing chart: $CHART"
+          
+          # Set namespace (chart-name-system)
+          NAMESPACE="${CHART}-system"
+          
+          # Check if values.yaml exists
+          VALUES_FILE="values.yaml"
+          if [ ! -f "helm/$CHART/$VALUES_FILE" ]; then
+            echo "⚠️  Warning: values.yaml not found in helm/$CHART/, using chart defaults"
+          fi
+          
+          # Generate ArgoCD Application YAML
+          cat > "argocd-app-${CHART}.yaml" << EOF
+        apiVersion: argoproj.io/v1alpha1
+        kind: Application
+        metadata:
+          name: $CHART
+          namespace: argocd
+          labels:
+            app.kubernetes.io/name: $CHART
+            app.kubernetes.io/part-of: argocd
+            deployed-by: github-actions
+            deployed-at: $(date -u +"%Y-%m-%dT%H:%M:%SZ")
+        spec:
+          project: default
+          
+          # Source configuration - from your GitHub repository
+          source:
+            repoURL: https://github.com/${{ github.repository }}.git
+            targetRevision: HEAD
+            path: helm/$CHART
+            helm:
+              valueFiles:
+                - $VALUES_FILE
+          
+          # Destination configuration - where to deploy
+          destination:
+            server: https://kubernetes.default.svc
+            namespace: $NAMESPACE
+          
+          # Sync policy configuration
+          syncPolicy:
+            automated:
+              prune: true      # Remove resources that are no longer defined
+              selfHeal: true   # Automatically sync when drift is detected
+              allowEmpty: false
+            syncOptions:
+              - CreateNamespace=true  # Create namespace if it doesn't exist
+              - PrunePropagationPolicy=foreground
+              - PruneLast=true
+            retry:
+              limit: 5
+              backoff:
+                duration: 5s
+                factor: 2
+                maxDuration: 3m
+          
+          # Ignore differences in certain fields
+          ignoreDifferences:
+            - group: ""
+              kind: Secret
+              jsonPointers:
+                - /data
+        EOF
+          
+          echo "✅ Generated ArgoCD Application YAML for $CHART"
+          echo "📁 Application will be deployed to namespace: $NAMESPACE"
+          echo "📂 Helm chart path: helm/$CHART"
+        done
+        
+    - name: 🔍 Verify Helm Charts
+      if: steps.detect-charts.outputs.charts != '[]'
+      run: |
+        CHARTS="${{ steps.detect-charts.outputs.charts }}"
+        
+        for CHART in $CHARTS; do
+          echo "🔍 Validating chart: $CHART"
+          
+          if [ ! -d "helm/$CHART" ]; then
+            echo "❌ Error: Helm chart directory 'helm/$CHART' not found!"
+            exit 1
+          fi
+          
+          if [ ! -f "helm/$CHART/Chart.yaml" ]; then
+            echo "❌ Error: Chart.yaml not found in 'helm/$CHART'!"
+            exit 1
+          fi
+          
+          echo "✅ Chart $CHART validation passed"
+        done
+        
+    - name: 🚀 Deploy to ArgoCD
+      if: steps.detect-charts.outputs.charts != '[]'
+      run: |
+        CHARTS="${{ steps.detect-charts.outputs.charts }}"
+        
+        for CHART in $CHARTS; do
+          echo "🚀 Deploying $CHART to ArgoCD..."
+          
+          # Apply the ArgoCD application
+          kubectl apply -f "argocd-app-${CHART}.yaml"
+          
+          echo "✅ ArgoCD application created successfully for $CHART!"
+        done
+        
+        echo "⏳ ArgoCD will now automatically sync and deploy all applications..."
+        
+    - name: 📊 Check deployment status
+      if: steps.detect-charts.outputs.charts != '[]'
+      run: |
+        CHARTS="${{ steps.detect-charts.outputs.charts }}"
+        
+        echo "📊 Checking ArgoCD application status..."
+        for CHART in $CHARTS; do
+          echo ""
+          echo "📋 Application: $CHART"
+          kubectl get application "$CHART" -n argocd || echo "Application not found yet (may still be creating)"
+        done
+        
+        echo ""
+        echo "🎯 Next steps:"
+        echo "1. ArgoCD will automatically detect and sync all applications"
+        echo "2. Applications will be deployed to their respective namespaces"
+        echo "3. ArgoCD will continue to monitor and sync any future changes"
+        echo ""
+        echo "🔗 View in ArgoCD UI: https://localhost:8080 (if port-forwarded)"
+        
+    - name: 🧹 Cleanup
+      if: steps.detect-charts.outputs.charts != '[]'
+      run: |
+        CHARTS="${{ steps.detect-charts.outputs.charts }}"
+        
+        # Remove the generated YAML files
+        for CHART in $CHARTS; do
+          rm -f "argocd-app-${CHART}.yaml"
+        done
+        
+        echo "🧹 Cleaned up temporary files"
