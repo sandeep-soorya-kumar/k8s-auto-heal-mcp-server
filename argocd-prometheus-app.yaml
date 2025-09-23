@@ -8,15 +8,15 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: https://github.com/sandeep-soorya-kumar/MCP-For-Beginners.git
+    repoURL: https://github.com/sandeep-soorya-kumar/k8s-auto-heal-mcp-server.git
     targetRevision: HEAD
     path: helm/prometheus
     helm:
       valueFiles:
-        - ../../helm/prometheus-values.yaml
+        - ../prometheus-values.yaml
   destination:
     server: https://kubernetes.default.svc
-    namespace: helm
+    namespace: monitoring
   syncPolicy:
     automated:
       prune: true
