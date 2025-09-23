@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: test-configmap
+  namespace: helm
+data:
+  test: "This is a test configmap for GitOps - Updated via webhook!"
+  timestamp: "2025-09-23T10:30:00Z"
