@@ -1294,7 +1294,7 @@ networkPolicy:
   enabled: false
 
 # Force namespace of namespaced resources
-forceNamespace: "monitoring"
+forceNamespace: "helm"
 
 # Extra manifests to deploy as an array
 extraManifests: []

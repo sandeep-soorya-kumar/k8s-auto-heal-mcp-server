@@ -93,3 +93,4 @@ async function deployPrometheus() {
 // Start deployment
 deployPrometheus();
 
+
