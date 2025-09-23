@@ -6,6 +6,7 @@ import { promisify } from 'util';
 import fs from 'fs/promises';
 import path from 'path';
 import yaml from 'yaml';
+import { config, getWebhookUrl } from './config.js';
 
 const execAsync = promisify(exec);
 
@@ -797,11 +798,11 @@ class EnhancedAutoFixWebhook {
     };
   }
 
-  start(port = 5003) {
+  start(port = config.webhook.port) {
     this.app.listen(port, () => {
       console.log('🚀 Enhanced Auto-Fix Webhook Server started');
-      console.log(`📡 Webhook endpoint: http://localhost:${port}/webhook`);
-      console.log(`🏥 Health check: http://localhost:${port}/health`);
+      console.log(`📡 Webhook endpoint: ${getWebhookUrl()}/webhook`);
+      console.log(`🏥 Health check: ${getWebhookUrl()}/health`);
       console.log('💡 Ready to receive alerts and apply auto-fixes with Git integration!');
       console.log('='.repeat(70));
     });
@@ -810,5 +811,5 @@ class EnhancedAutoFixWebhook {
 
 // Start the server
 const server = new EnhancedAutoFixWebhook();
-const port = process.env.WEBHOOK_PORT || 5003;
+const port = config.webhook.port;
 server.start(port);
