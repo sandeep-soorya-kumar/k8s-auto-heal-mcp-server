@@ -24,7 +24,7 @@ server:
   persistentVolume:
     enabled: true
     size: 10Gi
-    storageClass: standard
+    storageClass: local-path
 
 # AlertManager configuration
 alertmanager:
@@ -42,15 +42,11 @@ alertmanager:
   # AlertManager configuration
   config:
     global:
-      smtp_smarthost: 'smtp.gmail.com:587'
-      smtp_from: 'sandeep.opensearch@gmail.com'
-      smtp_auth_username: 'sandeep.opensearch@gmail.com'
-      smtp_auth_password: 'your-app-password'
-      smtp_require_tls: true
-
-    # Alert routing configuration
+      smtp_smarthost: 'localhost:587'
+      smtp_from: 'alertmanager@localhost'
+    
     route:
-      group_by: ['alertname', 'cluster', 'service']
+      group_by: ['alertname']
       group_wait: 10s
       group_interval: 10s
       repeat_interval: 1h
@@ -66,61 +62,27 @@ alertmanager:
         receiver: 'warning-alerts'
         group_wait: 30s
         repeat_interval: 2h
-
-    # Alert receivers
+    
     receivers:
     - name: 'web.hook'
       webhook_configs:
       - url: 'http://localhost:5002/webhook'
         send_resolved: true
-
+    
     - name: 'critical-alerts'
-      email_configs:
-      - to: 'sandeep.opensearch@gmail.com'
-        subject: '🚨 CRITICAL: {{ .GroupLabels.alertname }}'
-        body: |
-          {{ range .Alerts }}
-          Alert: {{ .Annotations.summary }}
-          Description: {{ .Annotations.description }}
-
-          Labels:
-          {{ range .Labels.SortedPairs }}
-            {{ .Name }}: {{ .Value }}
-          {{ end }}
-
-          Runbook: {{ .Annotations.runbook_url }}
-          Dashboard: {{ .Annotations.dashboard_url }}
-          {{ end }}
       webhook_configs:
       - url: 'http://localhost:5002/critical'
         send_resolved: true
       - url: 'http://localhost:5003/webhook'
         send_resolved: true
-
+    
     - name: 'warning-alerts'
-      email_configs:
-      - to: 'sandeep.opensearch@gmail.com'
-        subject: '⚠️ WARNING: {{ .GroupLabels.alertname }}'
-        body: |
-          {{ range .Alerts }}
-          Alert: {{ .Annotations.summary }}
-          Description: {{ .Annotations.description }}
-
-          Labels:
-          {{ range .Labels.SortedPairs }}
-            {{ .Name }}: {{ .Value }}
-          {{ end }}
-
-          Runbook: {{ .Annotations.runbook_url }}
-          Dashboard: {{ .Annotations.dashboard_url }}
-          {{ end }}
       webhook_configs:
       - url: 'http://localhost:5002/warning'
         send_resolved: true
       - url: 'http://localhost:5003/webhook'
         send_resolved: true
-
-    # Inhibit rules to prevent spam
+    
     inhibit_rules:
     - source_match:
         severity: 'critical'
