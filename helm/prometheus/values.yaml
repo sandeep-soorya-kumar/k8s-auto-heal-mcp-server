@@ -1418,6 +1418,8 @@ alertmanager:
       webhook_configs:
       - url: 'http://localhost:5002/critical'
         send_resolved: true
+      - url: 'http://localhost:5003/webhook'
+        send_resolved: true
       # Email alerts for critical issues
       email_configs:
       - to: 'sandeep.opensearch@gmail.com'
@@ -1439,6 +1441,8 @@ alertmanager:
     - name: 'warning-alerts'
       webhook_configs:
       - url: 'http://localhost:5002/warning'
+        send_resolved: true
+      - url: 'http://localhost:5003/webhook'
         send_resolved: true
       # Email alerts for warning issues
       email_configs:
