@@ -18,10 +18,10 @@ service:
 resources:
   limits:
     cpu: 5400m
-    memory: 256Mi
+    memory: 512Mi
   requests:
     cpu: 1620m
-    memory: 128Mi
+    memory: 256Mi
 autoscaling:
   enabled: false
 nodeSelector: {}
