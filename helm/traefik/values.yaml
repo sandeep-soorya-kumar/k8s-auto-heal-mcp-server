@@ -110,7 +110,7 @@ deployment:
 podDisruptionBudget:  # @schema additionalProperties: false
   enabled: true
   maxUnavailable: 1  # @schema type:[string, integer, null];minimum:0
-  minAvailable: 2    # @schema type:[string, integer, null];minimum:0
+  minAvailable:      # @schema type:[string, integer, null];minimum:0
 
 # -- Create a default IngressClass for Traefik
 ingressClass:  # @schema additionalProperties: false
