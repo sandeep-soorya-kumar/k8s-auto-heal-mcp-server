@@ -403,6 +403,8 @@ class EnhancedAutoFixWebhook {
       // Read current values.yaml
       const valuesPath = path.join(process.cwd(), chartPath, 'values.yaml');
       const valuesContent = await fs.readFile(valuesPath, 'utf8');
+      
+      // Parse YAML while preserving comments using a different approach
       const values = yaml.parse(valuesContent);
       
       // Apply updates
@@ -421,8 +423,8 @@ class EnhancedAutoFixWebhook {
         current[keys[keys.length - 1]] = value;
       }
       
-      // Write back to file
-      const newContent = yaml.stringify(values, { indent: 2 });
+      // Use a comment-preserving YAML stringify approach
+      const newContent = this.preserveCommentsYamlStringify(values, valuesContent);
       await fs.writeFile(valuesPath, newContent);
       
       // Use Git MCP server for commit and push
@@ -431,6 +433,123 @@ class EnhancedAutoFixWebhook {
     } catch (error) {
       console.error('Error updating Helm values:', error);
       return { success: false, error: error.message };
+    }
+  }
+
+  // Helper method to preserve comments when updating YAML
+  preserveCommentsYamlStringify(values, originalContent) {
+    try {
+      console.log('🔧 Attempting to preserve comments in YAML...');
+      
+      // Parse the original content to get the structure
+      const originalLines = originalContent.split('\n');
+      
+      // Create a map to store comments with their context
+      const commentContext = new Map();
+      let currentSection = '';
+      let currentIndent = 0;
+      
+      // First pass: identify comments and their context
+      for (let i = 0; i < originalLines.length; i++) {
+        const line = originalLines[i];
+        const trimmedLine = line.trim();
+        
+        // Track current section and indentation
+        if (trimmedLine && !trimmedLine.startsWith('#')) {
+          const indent = line.length - line.trimStart().length;
+          if (indent <= currentIndent) {
+            // This is a new section
+            const keyMatch = trimmedLine.match(/^([^:]+):/);
+            if (keyMatch) {
+              currentSection = keyMatch[1];
+              currentIndent = indent;
+            }
+          }
+        }
+        
+        // Store comments with their context
+        if (trimmedLine.startsWith('#')) {
+          const context = currentSection || 'root';
+          if (!commentContext.has(context)) {
+            commentContext.set(context, []);
+          }
+          commentContext.get(context).push({
+            line: line,
+            index: i,
+            content: trimmedLine
+          });
+        }
+      }
+      
+      // Generate new YAML content
+      const newContent = yaml.stringify(values, { 
+        indent: 2,
+        lineWidth: 120,
+        minContentWidth: 0
+      });
+      
+      // If no comments found, return standard stringify
+      if (commentContext.size === 0) {
+        console.log('📝 No comments found, using standard YAML output');
+        return newContent;
+      }
+      
+      // Try to merge comments back into the new content
+      const newLines = newContent.split('\n');
+      const result = [];
+      
+      // Add header comment about auto-fix
+      result.push('# Auto-fix applied by Kubernetes Alert Manager');
+      result.push(`# Timestamp: ${new Date().toISOString()}`);
+      result.push('');
+      
+      // Process each line of the new content
+      for (let i = 0; i < newLines.length; i++) {
+        const line = newLines[i];
+        const trimmedLine = line.trim();
+        
+        // Check if this line starts a new section
+        if (trimmedLine && !trimmedLine.startsWith('#')) {
+          const keyMatch = trimmedLine.match(/^([^:]+):/);
+          if (keyMatch) {
+            const sectionName = keyMatch[1];
+            
+            // Add any comments that belong to this section
+            if (commentContext.has(sectionName)) {
+              const comments = commentContext.get(sectionName);
+              comments.forEach(comment => {
+                result.push(comment.line);
+              });
+            }
+          }
+        }
+        
+        // Add the actual content line
+        result.push(line);
+      }
+      
+      // Add any remaining comments that couldn't be placed in context
+      const remainingComments = [];
+      commentContext.forEach((comments, section) => {
+        comments.forEach(comment => {
+          if (!result.includes(comment.line)) {
+            remainingComments.push(comment.line);
+          }
+        });
+      });
+      
+      if (remainingComments.length > 0) {
+        result.push('');
+        result.push('# Additional comments:');
+        result.push(...remainingComments);
+      }
+      
+      console.log(`✅ Preserved ${commentContext.size} comment sections`);
+      return result.join('\n');
+      
+    } catch (error) {
+      console.warn('⚠️ Could not preserve comments, using standard stringify:', error.message);
+      return yaml.stringify(values, { indent: 2 });
     }
   }
 
