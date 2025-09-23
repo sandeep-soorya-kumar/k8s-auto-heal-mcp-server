@@ -17,10 +17,10 @@ service:
   port: 80
 resources:
   limits:
-    cpu: 200m
+    cpu: 600m
     memory: 128Mi
   requests:
-    cpu: 60m
+    cpu: 180m
     memory: 64Mi
 autoscaling:
   enabled: false
