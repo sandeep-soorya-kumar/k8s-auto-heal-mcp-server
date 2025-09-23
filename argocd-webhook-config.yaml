@@ -8,3 +8,5 @@ data:
   server.insecure: "true"
   # Allow webhook access
   server.enable.grpc.web: "true"
+  # Allow insecure repositories
+  reposerver.insecure: "true"
