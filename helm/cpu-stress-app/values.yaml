@@ -31,3 +31,4 @@ cpuStress:
   enabled: true
   intensity: 100
   duration: 60
+  # Force ArgoCD cache refresh

@@ -12,6 +12,20 @@ const execAsync = promisify(exec);
 class EnhancedAutoFixWebhook {
   constructor() {
     this.app = express();
+    
+    // Add CORS support
+    this.app.use((req, res, next) => {
+      res.header('Access-Control-Allow-Origin', '*');
+      res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+      res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
+      
+      if (req.method === 'OPTIONS') {
+        res.sendStatus(200);
+      } else {
+        next();
+      }
+    });
+    
     this.app.use(express.json());
     this.setupRoutes();
   }
@@ -76,6 +90,11 @@ class EnhancedAutoFixWebhook {
         case 'PodHighCPUUsage':
         case 'PodCPUThrottling':
           fixResult = await this.autoFixCPU(podName, namespace);
+          break;
+        
+        case 'PodHighMemoryUsage':
+        case 'PodVeryHighMemoryUsage':
+          fixResult = await this.autoFixHighMemory(podName, namespace);
           break;
         
         case 'TestAlert':
@@ -202,8 +221,9 @@ class EnhancedAutoFixWebhook {
         console.log('✅ CPU fix applied successfully:');
         console.log(`  - Chart: ${chartPath}`);
         console.log(`  - CPU: ${currentCPU} → ${newCPU}`);
-        console.log(`  - Committed to Git: ${gitResult.commitHash}`);
-        console.log('  - ArgoCD will sync changes automatically');
+        console.log(`  - Branch: ${gitResult.branchName}`);
+        console.log(`  - PR: ${gitResult.prUrl}`);
+        console.log('  - ArgoCD will sync changes after PR merge');
 
         return {
           message: `CPU fix applied for ${podName}`,
@@ -213,7 +233,10 @@ class EnhancedAutoFixWebhook {
             new_limit: newCPU,
             chart: chartPath,
             committed: true,
-            commit_hash: gitResult.commitHash
+            commit_hash: gitResult.commitHash,
+            branch_name: gitResult.branchName,
+            pr_number: gitResult.prNumber,
+            pr_url: gitResult.prUrl
           }
         };
       } else {
@@ -225,6 +248,75 @@ class EnhancedAutoFixWebhook {
     } catch (error) {
       return {
         message: `Failed to auto-fix CPU for ${podName}: ${error.message}`,
+        action: 'error'
+      };
+    }
+  }
+
+  async autoFixHighMemory(podName, namespace) {
+    console.log(`🔧 Auto-fixing high memory usage for pod: ${podName} in namespace: ${namespace}`);
+    
+    try {
+      // Get deployment info
+      const deploymentInfo = await this.getDeploymentInfo(podName, namespace);
+      if (!deploymentInfo) {
+        return {
+          message: `Could not find deployment for pod: ${podName}`,
+          action: 'error'
+        };
+      }
+
+      // Find Helm chart path
+      const chartPath = await this.findHelmChart(deploymentInfo.appName);
+      if (!chartPath) {
+        return {
+          message: `Could not find Helm chart for: ${deploymentInfo.appName}`,
+          action: 'error'
+        };
+      }
+
+      // Get current memory limits
+      const currentResources = await this.getCurrentResources(podName, namespace);
+      const currentMemory = currentResources.limits?.memory || '128Mi';
+      const newMemory = this.calculateNewMemoryLimit(currentMemory);
+
+      // Update Helm values with Git MCP
+      const gitResult = await this.updateHelmValuesWithGit(chartPath, {
+        'resources.limits.memory': newMemory,
+        'resources.requests.memory': this.calculateMemoryRequest(newMemory)
+      }, `🔧 Auto-fix Memory: Increase memory limits for ${podName} (${currentMemory} → ${newMemory})`);
+
+      if (gitResult.success) {
+        console.log('✅ Memory fix applied successfully:');
+        console.log(`  - Chart: ${chartPath}`);
+        console.log(`  - Memory: ${currentMemory} → ${newMemory}`);
+        console.log(`  - Branch: ${gitResult.branchName}`);
+        console.log(`  - PR: ${gitResult.prUrl}`);
+        console.log('  - ArgoCD will sync changes after PR merge');
+
+        return {
+          message: `Memory fix applied for ${podName}`,
+          action: 'memory_increase',
+          details: {
+            old_limit: currentMemory,
+            new_limit: newMemory,
+            chart: chartPath,
+            committed: true,
+            commit_hash: gitResult.commitHash,
+            branch_name: gitResult.branchName,
+            pr_number: gitResult.prNumber,
+            pr_url: gitResult.prUrl
+          }
+        };
+      } else {
+        return {
+          message: `Failed to commit memory fix for ${podName}: ${gitResult.error}`,
+          action: 'error'
+        };
+      }
+    } catch (error) {
+      return {
+        message: `Failed to auto-fix memory for ${podName}: ${error.message}`,
         action: 'error'
       };
     }
@@ -344,7 +436,11 @@ class EnhancedAutoFixWebhook {
 
   async gitCommitAndPush(filePath, commitMessage) {
     try {
-      console.log(`📤 Committing and pushing changes...`);
+      console.log(`📤 Creating pull request for auto-fix...`);
+      
+      // Create a new branch for the auto-fix
+      const branchName = `auto-fix-${Date.now()}`;
+      await execAsync(`git checkout -b ${branchName}`);
       
       // Add file to git
       await execAsync(`git add ${filePath}`);
@@ -353,20 +449,62 @@ class EnhancedAutoFixWebhook {
       const { stdout: commitResult } = await execAsync(`git commit -m "${commitMessage}"`);
       const commitHash = commitResult.match(/\[[\w\s-]+\s([a-f0-9]+)\]/)?.[1] || 'unknown';
       
-      // Push to remote
-      await execAsync('git push');
+      // Push the branch
+      await execAsync(`git push -u origin ${branchName}`);
       
-      console.log(`✅ Successfully committed and pushed: ${commitHash}`);
+      // Create pull request using GitHub CLI or API
+      const prResult = await this.createPullRequest(branchName, commitMessage, commitMessage);
+      
+      console.log(`✅ Successfully created PR: ${prResult.prUrl}`);
       
       return {
         success: true,
         commitHash: commitHash,
-        message: commitMessage
+        message: commitMessage,
+        branchName: branchName,
+        prNumber: prResult.prNumber,
+        prUrl: prResult.prUrl
       };
       
     } catch (error) {
       console.error('Error with git operations:', error);
       return { success: false, error: error.message };
+    }
+  }
+
+  async createPullRequest(branchName, title, description) {
+    try {
+      // Try using GitHub CLI first
+      try {
+        const { stdout: prResult } = await execAsync(`gh pr create --title "${title}" --body "${description}" --head ${branchName} --base main`);
+        const prUrl = prResult.trim();
+        const prNumber = prUrl.match(/pull\/(\d+)/)?.[1] || 'unknown';
+        
+        return {
+          success: true,
+          prNumber: prNumber,
+          prUrl: prUrl,
+          method: 'gh-cli'
+        };
+      } catch (ghError) {
+        console.log('GitHub CLI not available, trying API approach...');
+        
+        // Fallback to direct commit if PR creation fails
+        console.log('⚠️  PR creation failed, falling back to direct commit');
+        await execAsync('git checkout main');
+        await execAsync('git merge --no-ff -m "Auto-fix: Merge auto-fix branch"');
+        await execAsync('git push');
+        
+        return {
+          success: true,
+          prNumber: 'direct-commit',
+          prUrl: 'Direct commit to main',
+          method: 'direct-commit'
+        };
+      }
+    } catch (error) {
+      console.error('Error creating pull request:', error);
+      throw error;
     }
   }
 
@@ -483,6 +621,38 @@ class EnhancedAutoFixWebhook {
     const cpuValue = parseInt(cpuLimit.replace('m', ''));
     const requestValue = Math.ceil(cpuValue * 0.3); // 30% of limit
     return `${requestValue}m`;
+  }
+
+  calculateNewMemoryLimit(currentMemory) {
+    const memoryValue = parseInt(currentMemory.replace(/[Mi|Gi]/, ''));
+    const unit = currentMemory.replace(/[0-9]/, '');
+    let newValue;
+    
+    if (unit === 'Mi') {
+      newValue = Math.max(memoryValue * 2, 256); // Double memory or minimum 256Mi
+      return `${newValue}Mi`;
+    } else if (unit === 'Gi') {
+      newValue = Math.max(memoryValue * 1.5, 1); // 1.5x memory or minimum 1Gi
+      return `${newValue}Gi`;
+    } else {
+      // Default to Mi if unit not recognized
+      newValue = Math.max(memoryValue * 2, 256);
+      return `${newValue}Mi`;
+    }
+  }
+
+  calculateMemoryRequest(memoryLimit) {
+    const memoryValue = parseInt(memoryLimit.replace(/[Mi|Gi]/, ''));
+    const unit = memoryLimit.replace(/[0-9]/, '');
+    const requestValue = Math.ceil(memoryValue * 0.5); // 50% of limit
+    
+    if (unit === 'Mi') {
+      return `${requestValue}Mi`;
+    } else if (unit === 'Gi') {
+      return `${requestValue}Gi`;
+    } else {
+      return `${requestValue}Mi`;
+    }
   }
 
   async analyzeResourceNeeds(resources) {

@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kubernetes Alert Manager</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+</head>
+<body class="bg-gray-100 min-h-screen">
+    <div x-data="alertManager()" class="container mx-auto px-4 py-8">
+        <!-- Header -->
+        <div class="bg-white rounded-lg shadow-md p-6 mb-8">
+            <div class="flex items-center justify-between">
+                <div>
+                    <h1 class="text-3xl font-bold text-gray-800">
+                        <i class="fas fa-exclamation-triangle text-yellow-500 mr-3"></i>
+                        Kubernetes Alert Manager
+                    </h1>
+                    <p class="text-gray-600 mt-2">Manually trigger alerts and test auto-fix workflows</p>
+                </div>
+                <div class="flex items-center space-x-4">
+                    <div class="flex items-center space-x-2">
+                        <div class="w-3 h-3 rounded-full" :class="webhookStatus ? 'bg-green-500' : 'bg-red-500'"></div>
+                        <span class="text-sm font-medium" :class="webhookStatus ? 'text-green-600' : 'text-red-600'">
+                            Webhook <span x-text="webhookStatus ? 'Online' : 'Offline'"></span>
+                        </span>
+                    </div>
+                    <button @click="checkWebhookStatus()" class="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-lg transition-colors">
+                        <i class="fas fa-sync-alt mr-2"></i>Refresh
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Alert Trigger Form -->
+        <div class="bg-white rounded-lg shadow-md p-6 mb-8">
+            <h2 class="text-xl font-semibold text-gray-800 mb-6">
+                <i class="fas fa-bolt text-blue-500 mr-2"></i>
+                Trigger Manual Alert
+            </h2>
+            
+            <form @submit.prevent="triggerAlert()" class="space-y-6">
+                <!-- Alert Type Selection -->
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-2">Alert Type</label>
+                    <select x-model="selectedAlertType" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                        <option value="">Select an alert type...</option>
+                        <option value="PodHighCPUUsage">High CPU Usage</option>
+                        <option value="PodHighMemoryUsage">High Memory Usage</option>
+                        <option value="PodOOMKilled">Out of Memory (OOM)</option>
+                        <option value="PodCrashLoopBackOff">Crash Loop Back Off</option>
+                        <option value="PodVeryHighMemoryUsage">Very High Memory Usage</option>
+                        <option value="TestAlert">Test Alert</option>
+                    </select>
+                </div>
+
+                <!-- Pod Information -->
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Pod Name</label>
+                        <select x-model="alertData.pod" @change="onPodChange()" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                            <option value="">Select a pod...</option>
+                            <template x-for="pod in availablePods" :key="pod.name + pod.namespace">
+                                <option :value="pod.name" x-text="`${pod.name} (${pod.namespace})`"></option>
+                            </template>
+                        </select>
+                        <div class="flex items-center justify-between mt-1">
+                            <p class="text-xs text-gray-500">
+                                <i class="fas fa-sync-alt mr-1" :class="{'animate-spin': loadingPods}"></i>
+                                <span x-text="loadingPods ? 'Loading pods...' : `${availablePods.length} pods available`"></span>
+                            </p>
+                            <button @click="loadPods()" :disabled="loadingPods" 
+                                    class="text-xs text-blue-500 hover:text-blue-700 disabled:text-gray-400">
+                                <i class="fas fa-refresh mr-1"></i>Refresh
+                            </button>
+                        </div>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Namespace</label>
+                        <input x-model="alertData.namespace" type="text" readonly 
+                               class="w-full p-3 border border-gray-300 rounded-lg bg-gray-50 text-gray-600">
+                        <p class="text-xs text-gray-500 mt-1">Auto-filled from selected pod</p>
+                    </div>
+                </div>
+
+                <!-- Severity -->
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-2">Severity</label>
+                    <select x-model="alertData.severity" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                        <option value="warning">Warning</option>
+                        <option value="critical">Critical</option>
+                        <option value="info">Info</option>
+                    </select>
+                </div>
+
+                <!-- Custom Message -->
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-2">Custom Message (Optional)</label>
+                    <textarea x-model="alertData.customMessage" rows="3" placeholder="Add a custom description for this alert..."
+                              class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"></textarea>
+                </div>
+
+                <!-- Submit Button -->
+                <div class="flex justify-end">
+                    <button type="submit" :disabled="isLoading || !selectedAlertType" 
+                            class="bg-red-500 hover:bg-red-600 disabled:bg-gray-400 text-white px-8 py-3 rounded-lg transition-colors flex items-center">
+                        <i class="fas fa-paper-plane mr-2" x-show="!isLoading"></i>
+                        <i class="fas fa-spinner fa-spin mr-2" x-show="isLoading"></i>
+                        <span x-text="isLoading ? 'Triggering...' : 'Trigger Alert'"></span>
+                    </button>
+                </div>
+            </form>
+        </div>
+
+        <!-- Recent Alerts -->
+        <div class="bg-white rounded-lg shadow-md p-6">
+            <h2 class="text-xl font-semibold text-gray-800 mb-6">
+                <i class="fas fa-history text-green-500 mr-2"></i>
+                Recent Alerts
+            </h2>
+            
+            <div x-show="recentAlerts.length === 0" class="text-center py-8 text-gray-500">
+                <i class="fas fa-inbox text-4xl mb-4"></i>
+                <p>No alerts triggered yet</p>
+            </div>
+            
+            <div x-show="recentAlerts.length > 0" class="space-y-4">
+                <template x-for="alert in recentAlerts" :key="alert.id">
+                    <div class="border border-gray-200 rounded-lg p-4 hover:bg-gray-50 transition-colors">
+                        <div class="flex items-center justify-between">
+                            <div class="flex items-center space-x-3">
+                                <div class="w-3 h-3 rounded-full" :class="{
+                                    'bg-red-500': alert.severity === 'critical',
+                                    'bg-yellow-500': alert.severity === 'warning',
+                                    'bg-blue-500': alert.severity === 'info'
+                                }"></div>
+                                <div>
+                                    <h3 class="font-semibold text-gray-800" x-text="alert.type"></h3>
+                                    <p class="text-sm text-gray-600" x-text="alert.pod + ' in ' + alert.namespace"></p>
+                                </div>
+                            </div>
+                            <div class="text-right">
+                                <p class="text-sm text-gray-500" x-text="alert.timestamp"></p>
+                                <div class="flex items-center space-x-2 mt-1">
+                                    <span class="px-2 py-1 text-xs rounded-full" :class="{
+                                        'bg-green-100 text-green-800': alert.status === 'success',
+                                        'bg-red-100 text-red-800': alert.status === 'error',
+                                        'bg-yellow-100 text-yellow-800': alert.status === 'pending'
+                                    }" x-text="alert.status"></span>
+                                    <span x-show="alert.prUrl && alert.prUrl !== 'Direct commit to main'" 
+                                          class="text-blue-500 hover:text-blue-700 cursor-pointer">
+                                        <i class="fas fa-external-link-alt"></i>
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+                        <div x-show="alert.details" class="mt-3 p-3 bg-gray-50 rounded text-sm">
+                            <p><strong>Action:</strong> <span x-text="alert.details.action"></span></p>
+                            <p x-show="alert.details.old_limit"><strong>Old Limit:</strong> <span x-text="alert.details.old_limit"></span></p>
+                            <p x-show="alert.details.new_limit"><strong>New Limit:</strong> <span x-text="alert.details.new_limit"></span></p>
+                            <p x-show="alert.details.chart"><strong>Chart:</strong> <span x-text="alert.details.chart"></span></p>
+                        </div>
+                    </div>
+                </template>
+            </div>
+        </div>
+
+        <!-- Loading Overlay -->
+        <div x-show="isLoading" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div class="bg-white rounded-lg p-8 text-center">
+                <i class="fas fa-spinner fa-spin text-4xl text-blue-500 mb-4"></i>
+                <p class="text-lg font-semibold">Triggering Alert...</p>
+                <p class="text-gray-600">This may take a few moments</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function alertManager() {
+            return {
+                selectedAlertType: '',
+                webhookStatus: false,
+                isLoading: false,
+                loadingPods: false,
+                availablePods: [],
+                recentAlerts: [],
+                alertData: {
+                    pod: '',
+                    namespace: '',
+                    severity: 'warning',
+                    customMessage: ''
+                },
+
+                init() {
+                    this.checkWebhookStatus();
+                    this.loadRecentAlerts();
+                    this.loadPods();
+                    
+                    // Auto-refresh pods every 30 seconds
+                    setInterval(() => {
+                        this.loadPods();
+                    }, 30000);
+                },
+
+                async checkWebhookStatus() {
+                    try {
+                        const response = await fetch('http://localhost:5004/health');
+                        this.webhookStatus = response.ok;
+                    } catch (error) {
+                        this.webhookStatus = false;
+                    }
+                },
+
+                async loadPods() {
+                    this.loadingPods = true;
+                    try {
+                        const response = await fetch('/api/cluster/pods');
+                        const data = await response.json();
+                        if (data.success) {
+                            this.availablePods = data.pods || [];
+                        } else {
+                            console.error('Failed to load pods:', data.error);
+                        }
+                    } catch (error) {
+                        console.error('Error loading pods:', error);
+                    } finally {
+                        this.loadingPods = false;
+                    }
+                },
+
+                onPodChange() {
+                    const selectedPod = this.availablePods.find(p => p.name === this.alertData.pod);
+                    if (selectedPod) {
+                        this.alertData.namespace = selectedPod.namespace;
+                    }
+                },
+
+                async triggerAlert() {
+                    if (!this.selectedAlertType) return;
+
+                    this.isLoading = true;
+                    
+                    const alertPayload = {
+                        receiver: "critical-alerts",
+                        status: "firing",
+                        alerts: [{
+                            status: "firing",
+                            labels: {
+                                alertname: this.selectedAlertType,
+                                severity: this.alertData.severity,
+                                pod: this.alertData.pod,
+                                namespace: this.alertData.namespace,
+                                container: "cpu-stress",
+                                service: "kubernetes"
+                            },
+                            annotations: {
+                                summary: `${this.alertData.pod} has ${this.selectedAlertType.replace(/([A-Z])/g, ' $1').toLowerCase()}`,
+                                description: this.alertData.customMessage || `${this.alertData.pod} in namespace ${this.alertData.namespace} is experiencing ${this.selectedAlertType.replace(/([A-Z])/g, ' $1').toLowerCase()}.`,
+                                runbook_url: "https://kubernetes.io/docs/tasks/configure-pod-container/"
+                            },
+                            startsAt: new Date().toISOString()
+                        }]
+                    };
+
+                    try {
+                        const response = await fetch('http://localhost:5004/webhook', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json'
+                            },
+                            body: JSON.stringify(alertPayload)
+                        });
+
+                        const result = await response.json();
+                        
+                        // Add to recent alerts
+                        this.recentAlerts.unshift({
+                            id: Date.now(),
+                            type: this.selectedAlertType,
+                            pod: this.alertData.pod,
+                            namespace: this.alertData.namespace,
+                            severity: this.alertData.severity,
+                            timestamp: new Date().toLocaleString(),
+                            status: result.status === 'success' ? 'success' : 'error',
+                            details: result.result?.[0]?.fix_result?.details || null,
+                            prUrl: result.result?.[0]?.fix_result?.details?.pr_url || null
+                        });
+
+                        // Keep only last 10 alerts
+                        this.recentAlerts = this.recentAlerts.slice(0, 10);
+                        this.saveRecentAlerts();
+
+                        // Show success message
+                        this.showNotification('Alert triggered successfully!', 'success');
+
+                    } catch (error) {
+                        console.error('Error triggering alert:', error);
+                        this.showNotification('Failed to trigger alert', 'error');
+                    } finally {
+                        this.isLoading = false;
+                    }
+                },
+
+                showNotification(message, type) {
+                    // Simple notification - you could enhance this with a proper toast library
+                    alert(`${type.toUpperCase()}: ${message}`);
+                },
+
+                loadRecentAlerts() {
+                    const saved = localStorage.getItem('recentAlerts');
+                    if (saved) {
+                        this.recentAlerts = JSON.parse(saved);
+                    }
+                },
+
+                saveRecentAlerts() {
+                    localStorage.setItem('recentAlerts', JSON.stringify(this.recentAlerts));
+                }
+            }
+        }
+    </script>
+</body>
+</html>
