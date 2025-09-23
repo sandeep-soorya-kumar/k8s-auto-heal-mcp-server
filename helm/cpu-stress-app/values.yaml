@@ -16,12 +16,13 @@ service:
   type: ClusterIP
   port: 80
 resources:
-  limits:
+
     cpu: 16200m
-    memory: 256Mi
+    memory: 128Mi
   requests:
     cpu: 4860m
-    memory: 128Mi
+    memory: 64Mi
+
 autoscaling:
   enabled: false
 nodeSelector: {}
