@@ -1455,22 +1455,24 @@ alertmanager:
       - url: 'http://localhost:5003/webhook'
         send_resolved: true
       # Email alerts for critical issues
-      email_configs:
-      - to: 'sandeep.opensearch@gmail.com'
-        subject: '🚨 CRITICAL: {{ .GroupLabels.alertname }}'
-        body: |
-          {{ range .Alerts }}
-          Alert: {{ .Annotations.summary }}
-          Description: {{ .Annotations.description }}
-          
-          Labels:
-          {{ range .Labels.SortedPairs }}
-            {{ .Name }}: {{ .Value }}
-          {{ end }}
-          
-          Runbook: {{ .Annotations.runbook_url }}
-          Dashboard: {{ .Annotations.dashboard_url }}
-          {{ end }}
+             email_configs:
+             - to: 'sandeep.opensearch@gmail.com'
+               subject: '🚨 CRITICAL: {{ .GroupLabels.alertname }}'
+               html: |
+                 {{ range .Alerts }}
+                 <h2>Alert: {{ .Annotations.summary }}</h2>
+                 <p><strong>Description:</strong> {{ .Annotations.description }}</p>
+                 
+                 <h3>Labels:</h3>
+                 <ul>
+                 {{ range .Labels.SortedPairs }}
+                   <li><strong>{{ .Name }}:</strong> {{ .Value }}</li>
+                 {{ end }}
+                 </ul>
+                 
+                 <p><strong>Runbook:</strong> <a href="{{ .Annotations.runbook_url }}">{{ .Annotations.runbook_url }}</a></p>
+                 <p><strong>Dashboard:</strong> <a href="{{ .Annotations.dashboard_url }}">{{ .Annotations.dashboard_url }}</a></p>
+                 {{ end }}
 
     - name: 'warning-alerts'
       webhook_configs:
@@ -1479,22 +1481,24 @@ alertmanager:
       - url: 'http://localhost:5003/webhook'
         send_resolved: true
       # Email alerts for warning issues
-      email_configs:
-      - to: 'sandeep.opensearch@gmail.com'
-        subject: '⚠️ WARNING: {{ .GroupLabels.alertname }}'
-        body: |
-          {{ range .Alerts }}
-          Alert: {{ .Annotations.summary }}
-          Description: {{ .Annotations.description }}
-          
-          Labels:
-          {{ range .Labels.SortedPairs }}
-            {{ .Name }}: {{ .Value }}
-          {{ end }}
-          
-          Runbook: {{ .Annotations.runbook_url }}
-          Dashboard: {{ .Annotations.dashboard_url }}
-          {{ end }}
+             email_configs:
+             - to: 'sandeep.opensearch@gmail.com'
+               subject: '⚠️ WARNING: {{ .GroupLabels.alertname }}'
+               html: |
+                 {{ range .Alerts }}
+                 <h2>Alert: {{ .Annotations.summary }}</h2>
+                 <p><strong>Description:</strong> {{ .Annotations.description }}</p>
+                 
+                 <h3>Labels:</h3>
+                 <ul>
+                 {{ range .Labels.SortedPairs }}
+                   <li><strong>{{ .Name }}:</strong> {{ .Value }}</li>
+                 {{ end }}
+                 </ul>
+                 
+                 <p><strong>Runbook:</strong> <a href="{{ .Annotations.runbook_url }}">{{ .Annotations.runbook_url }}</a></p>
+                 <p><strong>Dashboard:</strong> <a href="{{ .Annotations.dashboard_url }}">{{ .Annotations.dashboard_url }}</a></p>
+                 {{ end }}
 
     # Inhibit rules to prevent spam
     inhibit_rules:
