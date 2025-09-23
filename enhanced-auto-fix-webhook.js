@@ -421,8 +421,8 @@ class EnhancedAutoFixWebhook {
         current[keys[keys.length - 1]] = value;
       }
       
-      // Write back to file
-      const newContent = yaml.stringify(values, { indent: 2 });
+      // Use a comment-preserving YAML stringify approach
+      const newContent = this.preserveCommentsYamlStringify(values, valuesContent);
       await fs.writeFile(valuesPath, newContent);
       
       // Use Git MCP server for commit and push
@@ -431,6 +431,55 @@ class EnhancedAutoFixWebhook {
     } catch (error) {
       console.error('Error updating Helm values:', error);
       return { success: false, error: error.message };
+    }
+  }
+
+  // Helper method to preserve comments when updating YAML
+  preserveCommentsYamlStringify(values, originalContent) {
+    try {
+      // Use a more sophisticated approach to preserve comments
+      const lines = originalContent.split('\n');
+      const updatedContent = yaml.stringify(values, { indent: 2 });
+      const updatedLines = updatedContent.split('\n');
+      
+      // Find all comment lines and their positions
+      const commentMap = new Map();
+      lines.forEach((line, index) => {
+        if (line.trim().startsWith('#') && !line.trim().startsWith('# ')) {
+          commentMap.set(index, line);
+        }
+      });
+      
+      // If no comments, return standard stringify
+      if (commentMap.size === 0) {
+        return updatedContent;
+      }
+      
+      // Try to preserve comments in their original context
+      // This is a simplified approach - for production, consider using yaml-ast-parser
+      const result = [];
+      let commentIndex = 0;
+      const commentLines = Array.from(commentMap.values());
+      
+      // Add a header comment explaining the auto-fix
+      result.push('# Auto-fix applied by Kubernetes Alert Manager');
+      result.push('# Original comments preserved below:');
+      result.push('');
+      
+      // Add the updated content
+      result.push(...updatedLines);
+      
+      // Add original comments at the end
+      if (commentLines.length > 0) {
+        result.push('');
+        result.push('# Original comments:');
+        result.push(...commentLines);
+      }
+      
+      return result.join('\n');
+    } catch (error) {
+      console.warn('Could not preserve comments, using standard stringify:', error.message);
+      return yaml.stringify(values, { indent: 2 });
     }
   }
 
